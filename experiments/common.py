@@ -57,27 +57,28 @@ def make_supervised_net(dataset):
     return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset))
 
 
-def plain_dm(dataset, quick, batch_size):
+def plain_dm(dataset, quick, batch_size, data_dir=None):
     """Plain ``(x, y)`` DataModule (supervised training + probes)."""
     if dataset == "mnist":
         return MNISTDataModule(quick=quick, batch_size=batch_size)
-    return JetClassDataModule(quick=quick, batch_size=batch_size)
+    return JetClassDataModule(quick=quick, batch_size=batch_size, data_dir=data_dir)
 
 
-def classwise_dm(dataset, quick, batch_size, holdout=None):
+def classwise_dm(dataset, quick, batch_size, holdout=None, data_dir=None):
     """``(x, y)`` DataModule that can drop a held-out class from training."""
     if dataset == "mnist":
         return ClasswiseMNISTDataModule(quick=quick, holdout=holdout, batch_size=batch_size)
-    return JetClassClasswiseDataModule(quick=quick, holdout=holdout, batch_size=batch_size)
+    return JetClassClasswiseDataModule(quick=quick, holdout=holdout, batch_size=batch_size,
+                                       data_dir=data_dir)
 
 
-def twoview_dm(dataset, quick, batch_size, labeled, holdout=None):
+def twoview_dm(dataset, quick, batch_size, labeled, holdout=None, data_dir=None):
     """Two-view DataModule (SIGReg-SSL / SupCon), optionally labelled / held-out."""
     if dataset == "mnist":
         return TwoViewMNISTDataModule(quick=quick, labeled=labeled, holdout=holdout,
                                       batch_size=batch_size)
     return JetClassTwoViewDataModule(quick=quick, labeled=labeled, holdout=holdout,
-                                     batch_size=batch_size)
+                                     batch_size=batch_size, data_dir=data_dir)
 
 
 def outfile(dataset, name):

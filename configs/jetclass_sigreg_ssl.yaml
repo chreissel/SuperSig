@@ -31,6 +31,10 @@ model:
 data:
   class_path: data.datasets.JetClassTwoViewDataModule
   init_args:
+    # Path to the real JetClass ROOT files, with train/ val/ test/ subdirs.
+    # If the path does not exist, a synthetic 'toy' generator is used instead.
+    # (Leave unset to fall back to the JETCLASS_DIR environment variable.)
+    data_dir: jetclass_data/
     classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1

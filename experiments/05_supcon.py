@@ -25,15 +25,15 @@ from utils.eval import (
 from utils.plotting import plot_roc, plot_binary_roc, plot_corner
 
 
-def run_no_holdout(dataset, quick, ssl_ep, probe_ep):
+def run_no_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None):
     print(f"\n===== SupCon, NO holdout (10-way) [{dataset}] =====")
-    tv = twoview_dm(dataset, quick, 256, labeled=True)
+    tv = twoview_dm(dataset, quick, 256, labeled=True, data_dir=data_dir)
     module = SupConModule(make_encoder(dataset))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 
     nc = n_classes(dataset)
-    dm = plain_dm(dataset, quick, 256); dm.setup()
+    dm = plain_dm(dataset, quick, 256, data_dir=data_dir); dm.setup()
     head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
@@ -44,15 +44,15 @@ def run_no_holdout(dataset, quick, ssl_ep, probe_ep):
                 title=f"SupCon 16-dim latent space [{dataset}]")
 
 
-def run_holdout(dataset, quick, ssl_ep, probe_ep):
+def run_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None):
     word = CLASS_WORD[dataset]
     print(f"\n===== SupCon, HOLDOUT {HOLDOUT} ({HOLDOUT}-vs-rest) [{dataset}] =====")
-    tv = twoview_dm(dataset, quick, 256, labeled=True, holdout=HOLDOUT)
+    tv = twoview_dm(dataset, quick, 256, labeled=True, holdout=HOLDOUT, data_dir=data_dir)
     module = SupConModule(make_encoder(dataset))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 
-    dm = plain_dm(dataset, quick, 256); dm.setup()
+    dm = plain_dm(dataset, quick, 256, data_dir=data_dir); dm.setup()
     head = nn.Linear(EMB_DIM, 2).to(DEVICE)
     train_binary_probe(backbone, head, dm.train_dataloader(), probe_ep)
     scores, ytrue = collect_binary_scores(backbone, head, dm.test_dataloader())
@@ -71,14 +71,16 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--ssl-epochs", type=int, default=None)
     ap.add_argument("--probe-epochs", type=int, default=None)
+    ap.add_argument("--data-dir", type=str, default=None,
+                    help="JetClass ROOT directory (falls back to $JETCLASS_DIR / toy)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     ssl_ep = args.ssl_epochs or default_epochs(args.quick, 8)
     probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
 
-    run_no_holdout(args.dataset, args.quick, ssl_ep, probe_ep)
-    run_holdout(args.dataset, args.quick, ssl_ep, probe_ep)
+    run_no_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir)
+    run_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir)
     print("\nDone.")
 
 

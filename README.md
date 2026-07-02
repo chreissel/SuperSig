@@ -87,11 +87,23 @@ stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 | encoder | `ConvBackbone` | `JetDeepSets` (or `JetTransformer`) |
 | augmentation | affine (two views) | η–φ rotation + pt/angular smearing |
 
-JetClass data is read from the real ROOT files (via `uproot`) under `JETCLASS_DIR`
-(env var, default `jetclass_data/`). **If the files aren't present, the DataModules
-fall back to a self-contained synthetic ("toy") generator**, so the full suite runs
-anywhere without the ~100 GB download. Point `JETCLASS_DIR` at a directory with
-`train/`, `val/`, `test/` subfolders of `*.root` files to use the real data.
+JetClass data is read from the real ROOT files (via `uproot`). Set the path in the
+config — each `configs/jetclass_*.yaml` has a `data.init_args.data_dir` field
+pointing at a directory with `train/`, `val/`, `test/` subfolders of `*.root` files:
+
+```yaml
+data:
+  class_path: data.datasets.JetClassDataModule
+  init_args:
+    data_dir: /path/to/JetClass    # real ROOT files (train/ val/ test/)
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]
+```
+
+If `data_dir` is left unset it falls back to the `JETCLASS_DIR` environment variable
+(default `jetclass_data/`). **If the path doesn't exist, the DataModules fall back to
+a self-contained synthetic ("toy") generator**, so the full suite runs anywhere
+without the ~100 GB download. The `experiments/` scripts take the path the same way —
+`--data-dir /path/to/JetClass` (or the env var).
 
 ## Usage
 

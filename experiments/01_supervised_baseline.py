@@ -23,13 +23,15 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--ckpt", type=str, default=None)
+    ap.add_argument("--data-dir", type=str, default=None,
+                    help="JetClass ROOT directory (falls back to $JETCLASS_DIR / toy)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     epochs = args.epochs or default_epochs(args.quick, 3)
     bs = 128 if args.dataset == "mnist" else 256
 
-    dm = plain_dm(args.dataset, args.quick, bs)
+    dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir)
     module = SupervisedModule(make_supervised_net(args.dataset))
     fit_or_load(module, dm, epochs, args.quick, ckpt=args.ckpt)
 

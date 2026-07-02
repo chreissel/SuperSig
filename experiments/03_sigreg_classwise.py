@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--ssl-epochs", type=int, default=None)
     ap.add_argument("--probe-epochs", type=int, default=None)
     ap.add_argument("--ckpt", type=str, default=None)
+    ap.add_argument("--data-dir", type=str, default=None,
+                    help="JetClass ROOT directory (falls back to $JETCLASS_DIR / toy)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -46,12 +48,12 @@ def main():
     bs = 256
 
     nc = n_classes(args.dataset)
-    emb_dm = classwise_dm(args.dataset, args.quick, bs)
+    emb_dm = classwise_dm(args.dataset, args.quick, bs, data_dir=args.data_dir)
     module = ClasswiseSIGRegModule(make_encoder(args.dataset), mode=args.mode, n_classes=nc)
     fit_or_load(module, emb_dm, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 
-    dm = plain_dm(args.dataset, args.quick, bs); dm.setup()
+    dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir); dm.setup()
     head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
