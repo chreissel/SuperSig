@@ -3,5 +3,7 @@ __pycache__/
 mnist_data/
 runs/
 *.log
+slurm_logs/*
+!slurm_logs/.gitkeep
 .DS_Store
 .ipynb_checkpoints/

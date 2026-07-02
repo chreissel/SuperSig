@@ -38,7 +38,7 @@ Two evaluation protocols:
 
 ```
 cli.py                 LightningCLI entrypoint (python cli.py fit --config ...)
-submit.sh              minimal SLURM wrapper around cli.py
+submit.sh              SLURM wrapper for the Cannon / iaifi_lab cluster (sbatch submit.sh <config>)
 configs/               one YAML per experiment (model + data + trainer)
   mnist_*.yaml         supervised / sigreg_ssl / sigreg_classwise_* /
                        sigreg_holdout4_* / supcon / supcon_holdout4
@@ -138,6 +138,17 @@ python cli.py fit --config configs/jetclass_sigreg_classwise_repulse.yaml
 
 Checkpoints and logs are written under `runs/<experiment>/`. You can override any
 config value on the command line, e.g. `--trainer.max_epochs 20`.
+
+On a SLURM cluster (the setup mirrors phlab-neurips25's Cannon / `iaifi_lab`
+environment) submit the same runs with `submit.sh`, which activates the conda/mamba
+env and runs `cli.py fit` on one GPU (logs go to `slurm_logs/`):
+
+```bash
+sbatch submit.sh configs/jetclass_supcon.yaml
+```
+
+Adjust the `#SBATCH` partition and the `mamba activate` env name at the top of
+`submit.sh` to match your account.
 
 ### Downstream evaluation (frozen probe → ROC / corner)
 
