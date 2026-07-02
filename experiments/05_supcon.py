@@ -15,7 +15,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, twoview_dm, outfile, n_classes, CLASS_WORD, DATASETS)
+                    make_encoder, make_projector, plain_dm, twoview_dm, outfile,
+                    n_classes, CLASS_WORD, DATASETS)
 from models.config import plot_path, EMB_DIM, HOLDOUT, DEVICE
 from models.litmodels import SupConModule
 from utils.eval import (
@@ -28,7 +29,7 @@ from utils.plotting import plot_roc, plot_binary_roc, plot_corner
 def run_no_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None):
     print(f"\n===== SupCon, NO holdout (10-way) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, data_dir=data_dir)
-    module = SupConModule(make_encoder(dataset))
+    module = SupConModule(make_encoder(dataset), projector=make_projector(dataset))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 
@@ -48,7 +49,7 @@ def run_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None):
     word = CLASS_WORD[dataset]
     print(f"\n===== SupCon, HOLDOUT {HOLDOUT} ({HOLDOUT}-vs-rest) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, holdout=HOLDOUT, data_dir=data_dir)
-    module = SupConModule(make_encoder(dataset))
+    module = SupConModule(make_encoder(dataset), projector=make_projector(dataset))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 

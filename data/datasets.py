@@ -182,6 +182,7 @@ class JetClassDataModule(_JetClassBase):
 
     def setup(self, stage=None):
         self.train_X, self.train_y = self._load("train", seed=0)
+        self.val_X, self.val_y = self._load("val", seed=2)
         self.test_X, self.test_y = self._load("test", seed=1)
 
     def train_dataloader(self):
@@ -189,11 +190,12 @@ class JetClassDataModule(_JetClassBase):
                           shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
                           shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        return self.val_dataloader()
+        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+                          shuffle=False, **self.loader_kwargs)
 
 
 class JetClassClasswiseDataModule(_JetClassBase):
@@ -210,6 +212,7 @@ class JetClassClasswiseDataModule(_JetClassBase):
             X, y = X[keep], y[keep]
             print(f"  jetclass train without class {self.holdout}: {len(y)} jets")
         self.train_X, self.train_y = X, y
+        self.val_X, self.val_y = self._load("val", seed=2)
         self.test_X, self.test_y = self._load("test", seed=1)
 
     def train_dataloader(self):
@@ -219,11 +222,12 @@ class JetClassClasswiseDataModule(_JetClassBase):
                           shuffle=True, drop_last=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
                           shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        return self.val_dataloader()
+        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+                          shuffle=False, **self.loader_kwargs)
 
 
 class JetClassTwoViewDataModule(_JetClassBase):
@@ -245,9 +249,9 @@ class JetClassTwoViewDataModule(_JetClassBase):
 
     def setup(self, stage=None):
         Xtr, ytr = self._load("train", seed=0)
-        Xte, yte = self._load("test", seed=1)
+        Xval, yval = self._load("val", seed=2)
         self.train_ds = self._wrap(Xtr, ytr)
-        self.val_ds = self._wrap(Xte, yte)
+        self.val_ds = self._wrap(Xval, yval)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, shuffle=True, drop_last=self.labeled,

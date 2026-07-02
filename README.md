@@ -83,9 +83,17 @@ stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 | | MNIST | JetClass |
 |--|-------|----------|
 | classes | 10 digits | 5 (QCD, Tbqq, Wqq, Zqq, Hbb) |
-| input | 28×28 image | particle cloud `[P, 7]` |
-| encoder | `ConvBackbone` | `JetDeepSets` (or `JetTransformer`) |
-| augmentation | affine (two views) | η–φ rotation + pt/angular smearing |
+| input | 28×28 image | particle cloud `[P, 21]` = 17 features + 4 (px,py,pz,E) |
+| encoder | `ConvBackbone` | `ParticleTransformerModel` (ParT); `JetDeepSets`/`JetTransformer` alt. |
+| projection head | — | `MLP` on the contrastive modules (SSL / SupCon) |
+| augmentation | affine (two views) | η–φ rotation (features + vectors) + pt smearing |
+
+The JetClass side mirrors the reference closely: the vendored **ParticleTransformer**
+(`models/parT.py`) as the encoder, the full **17 per-particle features** plus the
+`pf_vectors` (px,py,pz,E) used for ParT's pairwise features, the reference's manual
+per-feature **standardization**, a **projection head** for the contrastive objectives
+(loss on the projection, the encoder embedding used for probing), and a distinct
+**train / val / test** split.
 
 JetClass data is read from the real ROOT files (via `uproot`). Set the path in the
 config — each `configs/jetclass_*.yaml` has a `data.init_args.data_dir` field

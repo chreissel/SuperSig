@@ -1,4 +1,4 @@
-# JetClass supervised baseline: DeepSets backbone + classifier, cross-entropy.
+# JetClass supervised baseline: ParticleTransformer backbone + classifier.
 # Five-class embedding training (QCD, Tbqq, Wqq, Zqq, Hbb), mirroring phlab-neurips25.
 #   python cli.py fit --config configs/jetclass_supervised.yaml
 trainer:
@@ -28,10 +28,10 @@ model:
     model:
       class_path: models.networks.SupervisedJetNet
       init_args:
-        input_dim: 7
+        input_dim: 17
         emb_dim: 16
         n_classes: 5
-        encoder: deepsets
+        encoder: part
     lr: 1.0e-3
 
 data:

@@ -1,4 +1,5 @@
-# JetClass class-conditional SIGReg (learnmeans).  Five-class embedding training.
+# JetClass class-conditional SIGReg (learnmeans).  ParT encoder; the class-conditional
+# term structures the embedding directly, so no projection head is used here.
 #   python cli.py fit --config configs/jetclass_sigreg_holdout4_learnmeans.yaml
 trainer:
   accelerator: auto
@@ -25,10 +26,16 @@ model:
   class_path: models.litmodels.ClasswiseSIGRegModule
   init_args:
     encoder:
-      class_path: models.networks.JetDeepSets
+      class_path: models.networks.ParticleTransformerModel
       init_args:
-        input_dim: 7   # kinematic features per particle (see data/jetclass_data.py)
-        emb_dim: 16
+        input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
+        emb_dim: 16            # embedding / contrastive-space dimension
+        embed_dims: [128, 512, 128]
+        pair_embed_dims: [64, 64, 64]
+        num_heads: 8
+        num_layers: 8
+        num_cls_layers: 2
+        fc_params: [[128, 0.0]]
     mode: learnmeans
     n_classes: 5
     emb_dim: 16

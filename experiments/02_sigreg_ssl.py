@@ -12,7 +12,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, twoview_dm, outfile, n_classes, DATASETS)
+                    make_encoder, make_projector, plain_dm, twoview_dm, outfile,
+                    n_classes, DATASETS)
 from models.config import plot_path, EMB_DIM, DEVICE
 from models.litmodels import SIGRegSSLModule
 from utils.eval import train_linear_probe, collect_probs, collect_embeddings
@@ -36,7 +37,7 @@ def main():
     bs = 128 if args.dataset == "mnist" else 256
 
     tv = twoview_dm(args.dataset, args.quick, 256, labeled=False, data_dir=args.data_dir)
-    module = SIGRegSSLModule(make_encoder(args.dataset))
+    module = SIGRegSSLModule(make_encoder(args.dataset), projector=make_projector(args.dataset))
     fit_or_load(module, tv, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 

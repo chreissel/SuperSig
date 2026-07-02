@@ -22,7 +22,9 @@ import torch
 import lightning as pl
 
 from models.config import DEVICE
-from models.networks import ConvBackbone, SupervisedCNN, JetDeepSets, SupervisedJetNet
+from models.networks import (ConvBackbone, SupervisedCNN, ParticleTransformerModel,
+                             SupervisedJetNet, MLP)
+from models.config import EMB_DIM
 from data.datasets import (
     MNISTDataModule, ClasswiseMNISTDataModule, TwoViewMNISTDataModule,
     JetClassDataModule, JetClassClasswiseDataModule, JetClassTwoViewDataModule,
@@ -47,14 +49,19 @@ def default_epochs(quick, full):
 # --------------------------------------------------------------------------- #
 def make_encoder(dataset):
     """The backbone/encoder appropriate for the dataset (both -> EMB_DIM)."""
-    return ConvBackbone() if dataset == "mnist" else JetDeepSets(input_dim=JET_FEATURES)
+    return ConvBackbone() if dataset == "mnist" else ParticleTransformerModel(input_dim=JET_FEATURES)
+
+
+def make_projector(dataset):
+    """Projection head for the contrastive modules (JetClass only; mirrors reference)."""
+    return None if dataset == "mnist" else MLP(EMB_DIM, [EMB_DIM], EMB_DIM)
 
 
 def make_supervised_net(dataset):
     """End-to-end supervised network (backbone + classifier) for the dataset."""
     if dataset == "mnist":
         return SupervisedCNN()
-    return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset))
+    return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset), encoder="part")
 
 
 def plain_dm(dataset, quick, batch_size, data_dir=None):

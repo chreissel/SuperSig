@@ -7,24 +7,34 @@ the embedding is trained on a **five-class** subset by default -- QCD, Tbqq
 (ttbar), Wqq, Zqq, Hbb (see ``DEFAULT_CLASSES``).  All ten can be selected by
 passing an explicit ``classes`` list.
 
-Each jet is represented as a fixed-size particle cloud ``[n_particles, n_features]``
-with the standard kinematic feature set computed from the particle four-momenta::
+Each jet is a fixed-size particle cloud with, per particle, the reference's full
+**17 input features** followed by the four-momentum **vectors** used by
+ParticleTransformer for its pairwise interaction features::
 
-    [ log pt, log E, log(pt/pt_jet), log(E/E_jet), deltaR, deta, dphi ]
+    features (17): log_pt, log_e, log_ptrel, log_erel, deltaR,
+                   charge, isChargedHadron, isNeutralHadron, isPhoton,
+                   isElectron, isMuon, d0, d0err, dz, dzerr, deta, dphi
+    vectors  (4):  px, py, pz, energy
+
+so every jet tensor has ``N_CHANNELS = 21`` channels.  The 17 features are
+standardized with the same manual center/scale/clip values as the reference data
+config (``JetClass_full.yaml``); the four vectors are kept raw (ParT derives its
+own pairwise quantities from them).  Padded slots are all-zero, the sentinel the
+encoders use to build the particle mask.
 
 Two data paths are provided:
 
 * **real** -- read the official JetClass ROOT files with ``uproot`` (lazy import),
-  from ``JETCLASS_DIR`` (or a directory passed to the DataModule).
+  from ``JETCLASS_DIR`` (or a directory passed to the DataModule).  PID / impact-
+  parameter branches are used when present.
 * **toy**  -- a self-contained synthetic generator (class-dependent prong
   structure), so the *exact same* test suite runs anywhere without the ~100 GB
   download.  If the real files are not found the DataModules fall back to this.
 
-The augmentation used for the two-view (SIGReg-SSL / SupCon) trainings is
-physics-motivated: a random rotation in the eta-phi plane about the jet axis plus
-mild pt / angular smearing -- the jet-analogue of the image augmentations used for
-MNIST.  As in the reference repo, the augmentation lives here in the loader, not in
-the Lightning module.
+The two-view augmentation (SIGReg-SSL / SupCon) is an eta-phi rotation of the
+relative coordinates plus mild pt smearing; the same azimuthal rotation is applied
+to (px, py) so ParT's rotation-invariant pairwise features stay consistent.  As in
+the reference, the augmentation lives here in the loader, not in the module.
 """
 import glob
 import os
@@ -40,31 +50,71 @@ LABEL_BRANCHES = [f"label_{c}" for c in JETCLASS_CLASSES]
 # The five classes used for embedding training in the reference repo
 # (phlab-neurips25, configs/jetclass_data_configs/JetClass_full.yaml:
 #  value: [label_QCD, label_Tbqq, label_Wqq, label_Zqq, label_Hbb]).
-# This is the default class set for the JetClass DataModules; the resulting
-# contiguous labels are 0=QCD, 1=Tbqq (ttbar, hadronic top), 2=Wqq, 3=Zqq, 4=Hbb.
 DEFAULT_CLASSES = ["QCD", "Tbqq", "Wqq", "Zqq", "Hbb"]
-P4_BRANCHES = ["part_px", "part_py", "part_pz", "part_energy"]
 
-# Feature layout (indices matter for the augmentation below).
-FEATURE_NAMES = ["log_pt", "log_e", "log_ptrel", "log_erel", "deltaR", "deta", "dphi"]
-N_FEATURES = len(FEATURE_NAMES)
-I_DETA, I_DPHI, I_DR = 5, 6, 4
+P4_BRANCHES = ["part_px", "part_py", "part_pz", "part_energy"]
+# Optional per-particle branches (PID flags + impact parameters); used when present.
+EXTRA_BRANCHES = ["part_charge", "part_isChargedHadron", "part_isNeutralHadron",
+                  "part_isPhoton", "part_isElectron", "part_isMuon",
+                  "part_d0val", "part_d0err", "part_dzval", "part_dzerr"]
+
+# Feature layout (17), matching JetClass_full.yaml `pf_features`, then 4 vectors.
+FEATURE_NAMES = ["log_pt", "log_e", "log_ptrel", "log_erel", "deltaR",
+                 "charge", "isChargedHadron", "isNeutralHadron", "isPhoton",
+                 "isElectron", "isMuon", "d0", "d0err", "dz", "dzerr", "deta", "dphi"]
+N_FEATURES = len(FEATURE_NAMES)          # 17
+N_VECTORS = len(P4_BRANCHES)             # 4  (px, py, pz, energy)
+N_CHANNELS = N_FEATURES + N_VECTORS      # 21
+
+I_DR, I_DETA, I_DPHI = 4, 15, 16         # within the feature block
+I_PX, I_PY = N_FEATURES + 0, N_FEATURES + 1   # within the vector block
 
 N_PARTICLES = 64          # particles per jet after padding / truncation
+
+# Per-feature standardization (center, scale, clip_min, clip_max) from the
+# reference data config; ``None`` means no transform (raw value kept).
+STD = [
+    (1.7, 0.7, -5, 5),    # log_pt
+    (2.0, 0.7, -5, 5),    # log_e
+    (-4.7, 0.7, -5, 5),   # log_ptrel
+    (-4.7, 0.7, -5, 5),   # log_erel
+    (0.2, 4.0, -5, 5),    # deltaR
+    None,                 # charge
+    None,                 # isChargedHadron
+    None,                 # isNeutralHadron
+    None,                 # isPhoton
+    None,                 # isElectron
+    None,                 # isMuon
+    None,                 # d0 (= tanh(d0val))
+    (0, 1, 0, 1),         # d0err
+    None,                 # dz (= tanh(dzval))
+    (0, 1, 0, 1),         # dzerr
+    None,                 # deta
+    None,                 # dphi
+]
 
 
 # --------------------------------------------------------------------------- #
 # Feature computation (shared by the real and toy paths)                       #
 # --------------------------------------------------------------------------- #
-def compute_features(px, py, pz, energy):
+def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
+                     isNeutralHadron=None, isPhoton=None, isElectron=None,
+                     isMuon=None, d0val=None, d0err=None, dzval=None, dzerr=None):
     """
-    Kinematic features from padded four-momentum arrays.
-
-    Each argument is ``[N, P]`` with zero-padded (absent) particles.  Returns a
-    ``float32`` array ``[N, P, N_FEATURES]``; padded slots are all-zero, which is
-    the sentinel the encoders use to build their particle mask.
+    Build the ``[N, P, 21]`` jet tensor (17 standardized features + 4 raw vectors)
+    from padded per-particle arrays (each ``[N, P]``, zero-padded).  Optional
+    PID / impact-parameter arrays default to zero when absent.
     """
     px, py, pz, energy = (np.asarray(a, dtype=np.float64) for a in (px, py, pz, energy))
+    n, p = px.shape
+    z = np.zeros((n, p))
+
+    def opt(a, fn=None):
+        if a is None:
+            return z.copy()
+        a = np.asarray(a, dtype=np.float64)
+        return fn(a) if fn else a
+
     pt = np.hypot(px, py)
     mask = pt > 0                                            # real particles
     eta = np.arcsinh(np.divide(pz, pt, out=np.zeros_like(pz), where=mask))
@@ -86,9 +136,23 @@ def compute_features(px, py, pz, energy):
     log_ptrel = np.log(pt / (jpt + eps) + eps)
     log_erel = np.log(energy / (je + eps) + eps)
 
-    feats = np.stack([log_pt, log_e, log_ptrel, log_erel, dR, deta, dphi], axis=-1)
-    feats = feats * mask[..., None]                         # zero the padded slots
-    return feats.astype(np.float32)
+    feats = np.stack([
+        log_pt, log_e, log_ptrel, log_erel, dR,
+        opt(charge), opt(isChargedHadron), opt(isNeutralHadron), opt(isPhoton),
+        opt(isElectron), opt(isMuon),
+        opt(d0val, np.tanh), opt(d0err), opt(dzval, np.tanh), opt(dzerr),
+        deta, dphi,
+    ], axis=-1)                                              # [N, P, 17]
+
+    for i, params in enumerate(STD):
+        if params is not None:
+            c, s, lo, hi = params
+            feats[..., i] = np.clip((feats[..., i] - c) * s, lo, hi)
+
+    vectors = np.stack([px, py, pz, energy], axis=-1)        # [N, P, 4] (raw)
+    x = np.concatenate([feats, vectors], axis=-1)            # [N, P, 21]
+    x = x * mask[..., None]                                  # zero the padded slots
+    return x.astype(np.float32)
 
 
 # --------------------------------------------------------------------------- #
@@ -98,7 +162,8 @@ def gen_toy_jets(n_per_class, class_indices, n_particles=N_PARTICLES, seed=None)
     """
     Class-separable synthetic jets.  Class ``c`` gets ``1 + c % 4`` prongs and a
     class-dependent pt scale, so a linear probe on a learned embedding is
-    meaningful (ROC > 0.5) without the real dataset.
+    meaningful (ROC > 0.5) without the real dataset.  PID / impact-parameter
+    features are left at zero (the class signal is kinematic).
     """
     rng = np.random.default_rng(seed)
     px, py, pz, en, ys = [], [], [], [], []
@@ -169,7 +234,9 @@ def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
     for path in files:
         f = uproot.open(path)
         tree = f["tree"] if "tree" in f else f[f.keys(recursive=False)[0]]
-        arr = tree.arrays(P4_BRANCHES + label_cols, library="ak")
+        avail = set(tree.keys())
+        want = P4_BRANCHES + [b for b in EXTRA_BRANCHES if b in avail]
+        arr = tree.arrays(want + label_cols, library="ak")
 
         onehot = np.stack([ak.to_numpy(arr[b]).astype(np.int64) for b in label_cols], axis=1)
         cls_local = onehot.argmax(axis=1)
@@ -182,9 +249,21 @@ def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
         def pad(branch):
             a = arr[branch][sel]
             a = ak.pad_none(a, n_particles, clip=True)
-            return ak.to_numpy(ak.fill_none(a, 0.0))
+            return ak.to_numpy(ak.fill_none(a, 0.0)).astype(np.float64)
 
-        X = compute_features(pad("part_px"), pad("part_py"), pad("part_pz"), pad("part_energy"))
+        # map branch names -> compute_features kwargs
+        kwargs = {}
+        alias = {"part_charge": "charge", "part_isChargedHadron": "isChargedHadron",
+                 "part_isNeutralHadron": "isNeutralHadron", "part_isPhoton": "isPhoton",
+                 "part_isElectron": "isElectron", "part_isMuon": "isMuon",
+                 "part_d0val": "d0val", "part_d0err": "d0err",
+                 "part_dzval": "dzval", "part_dzerr": "dzerr"}
+        for b in EXTRA_BRANCHES:
+            if b in avail:
+                kwargs[alias[b]] = pad(b)
+
+        X = compute_features(pad("part_px"), pad("part_py"), pad("part_pz"),
+                             pad("part_energy"), **kwargs)
         y = np.array([remap[int(c)] for c in cls_orig[sel]], dtype=np.int64)
         Xs.append(X); ys.append(y); n_seen += len(y)
         if max_events and n_seen >= max_events:
@@ -201,9 +280,13 @@ def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
 # Augmentation + two-view datasets                                             #
 # --------------------------------------------------------------------------- #
 class JetAugment:
-    """Random eta-phi rotation about the jet axis + mild pt / angular smearing."""
+    """
+    Random eta-phi rotation of the relative coordinates + mild pt / log smearing.
+    The same azimuthal rotation is applied to (px, py) so ParT's rotation-invariant
+    pairwise features stay consistent with the rotated node features.
+    """
 
-    def __init__(self, ang_sigma=0.03, logpt_sigma=0.05):
+    def __init__(self, ang_sigma=0.02, logpt_sigma=0.05):
         self.ang_sigma = ang_sigma
         self.logpt_sigma = logpt_sigma
 
@@ -213,9 +296,14 @@ class JetAugment:
 
         theta = torch.rand(1, device=feats.device) * 2 * np.pi
         cos, sin = torch.cos(theta), torch.sin(theta)
+
         deta, dphi = feats[:, I_DETA].clone(), feats[:, I_DPHI].clone()
         feats[:, I_DETA] = cos * deta - sin * dphi
-        feats[:, I_DPHI] = sin * deta + cos * dphi          # deltaR (I_DR) is preserved
+        feats[:, I_DPHI] = sin * deta + cos * dphi          # deltaR (I_DR) preserved
+
+        px, py = feats[:, I_PX].clone(), feats[:, I_PY].clone()
+        feats[:, I_PX] = cos * px - sin * py                # azimuthal rotation of the
+        feats[:, I_PY] = sin * px + cos * py                # 4-vector (pairwise-invariant)
 
         feats[:, :4] += torch.randn_like(feats[:, :4]) * self.logpt_sigma
         feats[:, I_DETA] += torch.randn_like(feats[:, I_DETA]) * self.ang_sigma

@@ -1,4 +1,5 @@
 # JetClass hold-out-4 SupCon: class 4 (Hbb) removed from the embedding-training jets.
+# ParT encoder + projection head.
 #   python cli.py fit --config configs/jetclass_supcon_holdout4.yaml
 trainer:
   accelerator: auto
@@ -25,10 +26,22 @@ model:
   class_path: models.litmodels.SupConModule
   init_args:
     encoder:
-      class_path: models.networks.JetDeepSets
+      class_path: models.networks.ParticleTransformerModel
       init_args:
-        input_dim: 7   # kinematic features per particle (see data/jetclass_data.py)
-        emb_dim: 16
+        input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
+        emb_dim: 16            # embedding / contrastive-space dimension
+        embed_dims: [128, 512, 128]
+        pair_embed_dims: [64, 64, 64]
+        num_heads: 8
+        num_layers: 8
+        num_cls_layers: 2
+        fc_params: [[128, 0.0]]
+    projector:
+      class_path: models.networks.MLP
+      init_args:
+        input_dim: 16
+        hidden_dims: [16]
+        output_dim: 16
     temperature: 0.1
     lr: 1.0e-3
 

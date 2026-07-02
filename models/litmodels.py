@@ -86,19 +86,24 @@ class SIGRegSSLModule(pl.LightningModule):
     term on each view.  The loader is expected to yield ``(view1, view2)``.
     """
 
-    def __init__(self, encoder, lam=1.0, lr=1e-3):
+    def __init__(self, encoder, projector=None, lam=1.0, lr=1e-3):
         super().__init__()
         self.encoder = encoder
+        self.projector = projector
         self.lam = lam
         self.lr = lr
-        self.save_hyperparameters(ignore=["encoder"])
+        self.save_hyperparameters(ignore=["encoder", "projector"])
 
     def forward(self, x):
-        return self.encoder(x)
+        return self.encoder(x)                              # embedding for downstream eval
+
+    def _project(self, x):
+        h = self.encoder(x)
+        return self.projector(h) if self.projector is not None else h
 
     def _step(self, batch, stage):
         v1, v2 = batch
-        z1, z2 = self.encoder(v1), self.encoder(v2)
+        z1, z2 = self._project(v1), self._project(v2)
         inv = F.mse_loss(z1, z2)
         reg = 0.5 * (sigreg_loss(z1) + sigreg_loss(z2))
         loss = inv + self.lam * reg
@@ -197,19 +202,23 @@ class SupConModule(pl.LightningModule):
     to the SupCon loss with the labels duplicated across the two views.
     """
 
-    def __init__(self, encoder, temperature=0.1, lr=1e-3):
+    def __init__(self, encoder, projector=None, temperature=0.1, lr=1e-3):
         super().__init__()
         self.encoder = encoder
+        self.projector = projector
         self.temperature = temperature
         self.lr = lr
-        self.save_hyperparameters(ignore=["encoder"])
+        self.save_hyperparameters(ignore=["encoder", "projector"])
 
     def forward(self, x):
-        return self.encoder(x)
+        return self.encoder(x)                              # embedding for downstream eval
 
     def _step(self, batch, stage):
         v1, v2, y = batch
-        z = F.normalize(self.encoder(torch.cat([v1, v2])), dim=1)
+        h = self.encoder(torch.cat([v1, v2]))
+        if self.projector is not None:
+            h = self.projector(h)
+        z = F.normalize(h, dim=1)
         loss = supcon_loss(z, torch.cat([y, y]), temp=self.temperature)
         self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
         return loss
