@@ -1,0 +1,37 @@
+# Self-supervised SIGReg: invariance between two views + global isotropic Gaussian.
+#   python cli.py fit --config configs/mnist_sigreg_ssl.yaml
+trainer:
+  accelerator: auto
+  default_root_dir: runs/mnist_sigreg_ssl/
+  max_epochs: 8
+  log_every_n_steps: 20
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: SuperSIG
+      name: mnist_sigreg_ssl
+      group: mnist
+      save_dir: runs/mnist_sigreg_ssl/
+
+model:
+  class_path: models.litmodels.SIGRegSSLModule
+  init_args:
+    encoder:
+      class_path: models.networks.ConvBackbone
+      init_args:
+        emb_dim: 16
+    lam: 1.0
+    lr: 1.0e-3
+
+data:
+  class_path: data.datasets.TwoViewMNISTDataModule
+  init_args:
+    labeled: false
+    batch_size: 256
+    num_workers: 2

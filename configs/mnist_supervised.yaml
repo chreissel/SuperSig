@@ -1,0 +1,36 @@
+# Supervised baseline: CNN trained end-to-end with cross-entropy.
+#   python cli.py fit --config configs/mnist_supervised.yaml
+trainer:
+  accelerator: auto
+  default_root_dir: runs/mnist_supervised/
+  max_epochs: 3
+  log_every_n_steps: 20
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: SuperSIG
+      name: mnist_supervised
+      group: mnist
+      save_dir: runs/mnist_supervised/
+
+model:
+  class_path: models.litmodels.SupervisedModule
+  init_args:
+    model:
+      class_path: models.networks.SupervisedCNN
+      init_args:
+        emb_dim: 16
+        n_classes: 10
+    lr: 1.0e-3
+
+data:
+  class_path: data.datasets.MNISTDataModule
+  init_args:
+    batch_size: 128
+    num_workers: 2

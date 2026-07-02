@@ -1,0 +1,57 @@
+# JetClass class-conditional SIGReg (learnmeans).  ParT encoder; the class-conditional
+# term structures the embedding directly, so no projection head is used here.
+#   python cli.py fit --config configs/jetclass_sigreg_classwise_learnmeans.yaml
+trainer:
+  accelerator: auto
+  default_root_dir: runs/jetclass_sigreg_classwise_learnmeans/
+  max_epochs: 8
+  log_every_n_steps: 10
+  # Cap the data seen per epoch, mirroring phlab-neurips25 (only a fraction of the
+  # full JetClass training set is used).  Falls back to using all available
+  # batches when fewer exist.
+  limit_train_batches: 100
+  limit_val_batches: 20
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: SuperSIG
+      name: jetclass_sigreg_classwise_learnmeans
+      group: jetclass
+      save_dir: runs/jetclass_sigreg_classwise_learnmeans/
+
+model:
+  class_path: models.litmodels.ClasswiseSIGRegModule
+  init_args:
+    encoder:
+      class_path: models.networks.ParticleTransformerModel
+      init_args:
+        input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
+        emb_dim: 16            # embedding / contrastive-space dimension
+        embed_dims: [128, 512, 128]
+        pair_embed_dims: [64, 64, 64]
+        num_heads: 8
+        num_layers: 8
+        num_cls_layers: 2
+        fc_params: [[128, 0.0]]
+    mode: learnmeans
+    n_classes: 5
+    emb_dim: 16
+    beta_sep: 0.5
+    lr: 1.0e-3
+
+data:
+  class_path: data.datasets.JetClassClasswiseDataModule
+  init_args:
+    # Path to the real JetClass ROOT files, with train/ val/ test/ subdirs.
+    # The path must contain the ROOT files (a missing path raises a clear error).
+    # (Leave unset to fall back to the JETCLASS_DIR environment variable.)
+    data_dir: jetclass_data/
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
+    batch_size: 256
+    num_workers: 1

@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
-data/
+mnist_data/
+runs/
+wandb/
 *.log
+slurm_logs/*
+!slurm_logs/.gitkeep
 .DS_Store
 .ipynb_checkpoints/
