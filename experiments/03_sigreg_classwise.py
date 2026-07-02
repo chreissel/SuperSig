@@ -39,7 +39,7 @@ def main():
     ap.add_argument("--probe-epochs", type=int, default=None)
     ap.add_argument("--ckpt", type=str, default=None)
     ap.add_argument("--data-dir", type=str, default=None,
-                    help="JetClass ROOT directory (falls back to $JETCLASS_DIR / toy)")
+                    help="JetClass ROOT directory (falls back to $JETCLASS_DIR)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)

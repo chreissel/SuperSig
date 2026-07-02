@@ -22,14 +22,9 @@ config (``JetClass_full.yaml``); the four vectors are kept raw (ParT derives its
 own pairwise quantities from them).  Padded slots are all-zero, the sentinel the
 encoders use to build the particle mask.
 
-Two data paths are provided:
-
-* **real** -- read the official JetClass ROOT files with ``uproot`` (lazy import),
-  from ``JETCLASS_DIR`` (or a directory passed to the DataModule).  PID / impact-
-  parameter branches are used when present.
-* **toy**  -- a self-contained synthetic generator (class-dependent prong
-  structure), so the *exact same* test suite runs anywhere without the ~100 GB
-  download.  If the real files are not found the DataModules fall back to this.
+The official JetClass ROOT files are read with ``uproot`` (lazy import) from
+``JETCLASS_DIR`` (or a directory passed to the DataModule); PID / impact-parameter
+branches are used when present.
 
 The two-view augmentation (SIGReg-SSL / SupCon) is an eta-phi rotation of the
 relative coordinates plus mild pt smearing; the same azimuthal rotation is applied
@@ -95,7 +90,7 @@ STD = [
 
 
 # --------------------------------------------------------------------------- #
-# Feature computation (shared by the real and toy paths)                       #
+# Feature computation                                                          #
 # --------------------------------------------------------------------------- #
 def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
                      isNeutralHadron=None, isPhoton=None, isElectron=None,
@@ -156,48 +151,7 @@ def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
 
 
 # --------------------------------------------------------------------------- #
-# Synthetic ("toy") jets                                                        #
-# --------------------------------------------------------------------------- #
-def gen_toy_jets(n_per_class, class_indices, n_particles=N_PARTICLES, seed=None):
-    """
-    Class-separable synthetic jets.  Class ``c`` gets ``1 + c % 4`` prongs and a
-    class-dependent pt scale, so a linear probe on a learned embedding is
-    meaningful (ROC > 0.5) without the real dataset.  PID / impact-parameter
-    features are left at zero (the class signal is kinematic).
-    """
-    rng = np.random.default_rng(seed)
-    px, py, pz, en, ys = [], [], [], [], []
-    for c in class_indices:
-        n_sub = 1 + (c % 4)
-        pt_scale = 1.0 + 0.15 * c
-        for _ in range(n_per_class):
-            npart = int(rng.integers(20, n_particles))
-            eta0, phi0 = rng.normal(0, 1.0), rng.uniform(-np.pi, np.pi)
-            centers = rng.uniform(-0.5, 0.5, size=(n_sub, 2))
-            assign = rng.integers(0, n_sub, size=npart)
-            spread = 0.08 + 0.04 * (c % 3)
-            deta = centers[assign, 0] + rng.normal(0, spread, npart)
-            dphi = centers[assign, 1] + rng.normal(0, spread, npart)
-            pt = pt_scale * rng.exponential(3.0, npart) + 0.5
-            eta, phi = eta0 + deta, phi0 + dphi
-            row_px = pt * np.cos(phi)
-            row_py = pt * np.sin(phi)
-            row_pz = pt * np.sinh(eta)
-            row_e = pt * np.cosh(eta)
-            pad = n_particles - npart
-            px.append(np.pad(row_px, (0, pad)))
-            py.append(np.pad(row_py, (0, pad)))
-            pz.append(np.pad(row_pz, (0, pad)))
-            en.append(np.pad(row_e, (0, pad)))
-            ys.append(c)
-    X = compute_features(np.array(px), np.array(py), np.array(pz), np.array(en))
-    y = np.array(ys, dtype=np.int64)
-    perm = rng.permutation(len(y))
-    return torch.from_numpy(X[perm]), torch.from_numpy(y[perm])
-
-
-# --------------------------------------------------------------------------- #
-# Real JetClass ROOT files (uproot, lazily imported)                           #
+# JetClass ROOT files (uproot, lazily imported)                                #
 # --------------------------------------------------------------------------- #
 def _find_files(data_dir, split):
     if data_dir is None:
@@ -212,10 +166,10 @@ def _find_files(data_dir, split):
 def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
               max_events=None, max_files=None):
     """
-    Load real JetClass jets for ``split`` (``train`` / ``val`` / ``test``).
+    Load JetClass jets for ``split`` (``train`` / ``val`` / ``test``).
 
-    Returns ``(X, y)`` tensors, or ``None`` if no ROOT files are found (so callers
-    can fall back to the toy generator).
+    Returns ``(X, y)`` tensors, or ``None`` if no ROOT files are found under
+    ``data_dir`` (the DataModule turns that into a clear error).
     """
     files = _find_files(data_dir, split)
     if not files:

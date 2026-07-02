@@ -7,7 +7,7 @@ trainer:
   log_every_n_steps: 10
   # Cap the data seen per epoch, mirroring phlab-neurips25 (only a fraction of the
   # full JetClass training set is used).  Falls back to using all available
-  # batches when fewer exist (e.g. the small toy fallback).
+  # batches when fewer exist.
   limit_train_batches: 100
   limit_val_batches: 20
   callbacks:
@@ -48,7 +48,7 @@ data:
   class_path: data.datasets.JetClassTwoViewDataModule
   init_args:
     # Path to the real JetClass ROOT files, with train/ val/ test/ subdirs.
-    # If the path does not exist, a synthetic 'toy' generator is used instead.
+    # The path must contain the ROOT files (a missing path raises a clear error).
     # (Leave unset to fall back to the JETCLASS_DIR environment variable.)
     data_dir: jetclass_data/
     classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)

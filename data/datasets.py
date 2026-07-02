@@ -145,12 +145,11 @@ class TwoViewMNISTDataModule(GenericDataModule):
 # the (dataset-agnostic) Lightning modules work unchanged:                     #
 #   plain      -> (features, label)                                            #
 #   two-view   -> (view1, view2) or (view1, view2, label)                      #
-# Real JetClass ROOT files are read from JETCLASS_DIR (or `data_dir`) when      #
-# present; otherwise a synthetic toy generator is used so the suite runs        #
-# anywhere.                                                                     #
+# JetClass ROOT files are read from JETCLASS_DIR (or `data_dir`); a missing     #
+# path raises a clear error.                                                    #
 # --------------------------------------------------------------------------- #
 class _JetClassBase(GenericDataModule):
-    """Shared JetClass loading (real ROOT files with a toy fallback)."""
+    """Shared JetClass loading from the real ROOT files."""
 
     def __init__(self, classes=None, n_particles=jc.N_PARTICLES, quick=False,
                  data_dir=None, **kwargs):
@@ -162,28 +161,26 @@ class _JetClassBase(GenericDataModule):
         self.quick = quick
         self.data_dir = data_dir or JETCLASS_DIR
 
-    def _load(self, split, seed):
+    def _load(self, split):
         max_events = (2000 if self.quick else None)
-        real = jc.load_root(self.data_dir, split, self.class_indices,
-                            n_particles=self.n_particles, max_events=max_events)
-        if real is not None:
-            print(f"  jetclass[{split}] real ROOT: {len(real[1])} jets")
-            return real
-        n_per_class = 40 if self.quick else 400
-        X, y = jc.gen_toy_jets(n_per_class, range(len(self.class_indices)),
-                               n_particles=self.n_particles, seed=seed)
-        print(f"  jetclass[{split}] toy: {len(y)} jets "
-              f"({len(self.class_indices)} classes x {n_per_class})")
-        return X, y
+        out = jc.load_root(self.data_dir, split, self.class_indices,
+                           n_particles=self.n_particles, max_events=max_events)
+        if out is None:
+            raise FileNotFoundError(
+                f"No JetClass ROOT files for split '{split}' under {self.data_dir!r}. "
+                f"Set data_dir (or the JETCLASS_DIR env var) to a directory with "
+                f"train/ val/ test/ subfolders of *.root files.")
+        print(f"  jetclass[{split}] ROOT: {len(out[1])} jets")
+        return out
 
 
 class JetClassDataModule(_JetClassBase):
     """Plain JetClass ``(features, label)`` for all requested classes."""
 
     def setup(self, stage=None):
-        self.train_X, self.train_y = self._load("train", seed=0)
-        self.val_X, self.val_y = self._load("val", seed=2)
-        self.test_X, self.test_y = self._load("test", seed=1)
+        self.train_X, self.train_y = self._load("train")
+        self.val_X, self.val_y = self._load("val")
+        self.test_X, self.test_y = self._load("test")
 
     def train_dataloader(self):
         return DataLoader(jc.JetDataset(self.train_X, self.train_y),
@@ -206,14 +203,14 @@ class JetClassClasswiseDataModule(_JetClassBase):
         self.holdout = holdout
 
     def setup(self, stage=None):
-        X, y = self._load("train", seed=0)
+        X, y = self._load("train")
         if self.holdout is not None:
             keep = y != self.holdout
             X, y = X[keep], y[keep]
             print(f"  jetclass train without class {self.holdout}: {len(y)} jets")
         self.train_X, self.train_y = X, y
-        self.val_X, self.val_y = self._load("val", seed=2)
-        self.test_X, self.test_y = self._load("test", seed=1)
+        self.val_X, self.val_y = self._load("val")
+        self.test_X, self.test_y = self._load("test")
 
     def train_dataloader(self):
         # drop_last: see ClasswiseMNISTDataModule -- avoids an all-below-threshold
@@ -248,8 +245,8 @@ class JetClassTwoViewDataModule(_JetClassBase):
         return (jc.TwoViewLabeledJets(X, y) if self.labeled else jc.TwoViewJets(X))
 
     def setup(self, stage=None):
-        Xtr, ytr = self._load("train", seed=0)
-        Xval, yval = self._load("val", seed=2)
+        Xtr, ytr = self._load("train")
+        Xval, yval = self._load("val")
         self.train_ds = self._wrap(Xtr, ytr)
         self.val_ds = self._wrap(Xval, yval)
 

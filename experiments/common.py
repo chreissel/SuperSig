@@ -61,7 +61,7 @@ def make_supervised_net(dataset):
     """End-to-end supervised network (backbone + classifier) for the dataset."""
     if dataset == "mnist":
         return SupervisedCNN()
-    return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset), encoder="part")
+    return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset))
 
 
 def plain_dm(dataset, quick, batch_size, data_dir=None):

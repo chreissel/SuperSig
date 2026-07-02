@@ -46,13 +46,13 @@ configs/               one YAML per experiment (model + data + trainer)
 models/                networks, losses, and Lightning modules
   config.py            paths, constants, device
   networks.py          ConvBackbone, SupervisedCNN  (MNIST)
-                       JetDeepSets, JetTransformer, SupervisedJetNet  (JetClass)
+                       ParticleTransformerModel, SupervisedJetNet, MLP  (JetClass)
   losses.py            sigreg, class-conditional sigreg, separation/repulsion, supcon
   litmodels.py         LightningModules (SupervisedModule, SIGRegSSLModule,
                        ClasswiseSIGRegModule, SupConModule) — dataset-agnostic
 data/                  Lightning DataModules
   data_utils.py        MNIST transforms + two-view datasets
-  jetclass_data.py     JetClass features, ROOT loader (uproot) + toy fallback,
+  jetclass_data.py     JetClass features, ROOT loader (uproot),
                        jet augmentation, two-view datasets
   datasets.py          MNIST + JetClass DataModules (same batch formats)
 utils/                 kept out of the Lightning code paths
@@ -84,7 +84,7 @@ stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 |--|-------|----------|
 | classes | 10 digits | 5 (QCD, Tbqq, Wqq, Zqq, Hbb) |
 | input | 28×28 image | particle cloud `[P, 21]` = 17 features + 4 (px,py,pz,E) |
-| encoder | `ConvBackbone` | `ParticleTransformerModel` (ParT); `JetDeepSets`/`JetTransformer` alt. |
+| encoder | `ConvBackbone` | `ParticleTransformerModel` (ParT) |
 | projection head | — | `MLP` on the contrastive modules (SSL / SupCon) |
 | augmentation | affine (two views) | η–φ rotation (features + vectors) + pt smearing |
 
@@ -108,16 +108,14 @@ data:
 ```
 
 If `data_dir` is left unset it falls back to the `JETCLASS_DIR` environment variable
-(default `jetclass_data/`). **If the path doesn't exist, the DataModules fall back to
-a self-contained synthetic ("toy") generator**, so the full suite runs anywhere
-without the ~100 GB download. The `experiments/` scripts take the path the same way —
+(default `jetclass_data/`). The path must contain the ROOT files — a missing path
+raises a clear error. The `experiments/` scripts take the path the same way —
 `--data-dir /path/to/JetClass` (or the env var).
 
 Mirroring the reference, the JetClass configs cap the data seen per epoch with the
 Lightning trainer settings `limit_train_batches: 100` and `limit_val_batches: 20`
 (the reference uses the same values) — so only a fraction of the full training set is
-used. Adjust or remove those `trainer:` keys in the config to change it. When fewer
-batches exist (e.g. the small toy fallback), Lightning just uses all of them.
+used. Adjust or remove those `trainer:` keys in the config to change it.
 
 ## Usage
 
