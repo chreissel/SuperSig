@@ -40,25 +40,26 @@ Two evaluation protocols:
 cli.py                 LightningCLI entrypoint (python cli.py fit --config ...)
 submit.sh              minimal SLURM wrapper around cli.py
 configs/               one YAML per experiment (model + data + trainer)
-  mnist_supervised.yaml
-  mnist_sigreg_ssl.yaml
-  mnist_sigreg_classwise_{fixed,learnmeans,repulse}.yaml
-  mnist_sigreg_holdout4_{learnmeans,repulse}.yaml
-  mnist_supcon.yaml
-  mnist_supcon_holdout4.yaml
+  mnist_*.yaml         supervised / sigreg_ssl / sigreg_classwise_* /
+                       sigreg_holdout4_* / supcon / supcon_holdout4
+  jetclass_*.yaml      the same nine experiments on JetClass
 models/                networks, losses, and Lightning modules
   config.py            paths, constants, device
-  networks.py          ConvBackbone, SupervisedCNN
+  networks.py          ConvBackbone, SupervisedCNN  (MNIST)
+                       JetDeepSets, JetTransformer, SupervisedJetNet  (JetClass)
   losses.py            sigreg, class-conditional sigreg, separation/repulsion, supcon
   litmodels.py         LightningModules (SupervisedModule, SIGRegSSLModule,
-                       ClasswiseSIGRegModule, SupConModule)
+                       ClasswiseSIGRegModule, SupConModule) — dataset-agnostic
 data/                  Lightning DataModules
   data_utils.py        MNIST transforms + two-view datasets
-  datasets.py          MNIST / classwise / two-view DataModules
+  jetclass_data.py     JetClass features, ROOT loader (uproot) + toy fallback,
+                       jet augmentation, two-view datasets
+  datasets.py          MNIST + JetClass DataModules (same batch formats)
 utils/                 kept out of the Lightning code paths
   plotting.py          ROC and corner-plot helpers
   eval.py              frozen linear/binary probes + collectors
 experiments/           downstream analysis scripts (train/load → probe → plot)
+  common.py                dataset-aware factories (--dataset mnist|jetclass)
   01_supervised_baseline.py
   02_sigreg_ssl.py
   03_sigreg_classwise.py   --mode fixed|learnmeans|repulse
@@ -69,6 +70,24 @@ plots/                 all generated figures
 
 The loss functions in `models/losses.py` are the heart of the study and are used
 verbatim by the Lightning modules — the modules never re-implement an objective.
+
+### Two datasets, one test suite
+
+Every experiment runs on **MNIST** (10 digits) or **JetClass** (10 jet classes)
+— the class count and 16-d embedding line up, so the same losses and Lightning
+modules apply unchanged. Only the *encoder* and *DataModule* differ:
+
+| | MNIST | JetClass |
+|--|-------|----------|
+| input | 28×28 image | particle cloud `[P, 7]` |
+| encoder | `ConvBackbone` | `JetDeepSets` (or `JetTransformer`) |
+| augmentation | affine (two views) | η–φ rotation + pt/angular smearing |
+
+JetClass data is read from the real ROOT files (via `uproot`) under `JETCLASS_DIR`
+(env var, default `jetclass_data/`). **If the files aren't present, the DataModules
+fall back to a self-contained synthetic ("toy") generator**, so the full suite runs
+anywhere without the ~100 GB download. Point `JETCLASS_DIR` at a directory with
+`train/`, `val/`, `test/` subfolders of `*.root` files to use the real data.
 
 ## Usage
 
@@ -83,7 +102,10 @@ A run is defined entirely by its config:
 ```bash
 python cli.py fit --config configs/mnist_supcon.yaml
 python cli.py fit --config configs/mnist_sigreg_classwise_repulse.yaml
-python cli.py fit --config configs/mnist_sigreg_holdout4_repulse.yaml
+
+# the same experiments on JetClass
+python cli.py fit --config configs/jetclass_supcon.yaml
+python cli.py fit --config configs/jetclass_sigreg_classwise_repulse.yaml
 ```
 
 Checkpoints and logs are written under `runs/<experiment>/`. You can override any
@@ -96,16 +118,18 @@ The `experiments/` scripts train an embedding (a short in-script `Trainer.fit`, 
 probe, and write figures to `plots/`. Add `--quick` for a fast smoke test.
 
 ```bash
-# from the repo root
+# from the repo root — add --dataset jetclass to run any of them on JetClass
 python experiments/01_supervised_baseline.py
-python experiments/02_sigreg_ssl.py
-python experiments/03_sigreg_classwise.py --mode repulse
-python experiments/04_holdout4.py --mode both
-python experiments/05_supcon.py
+python experiments/02_sigreg_ssl.py --dataset jetclass
+python experiments/03_sigreg_classwise.py --mode repulse --dataset jetclass
+python experiments/04_holdout4.py --mode both --dataset jetclass
+python experiments/05_supcon.py --dataset jetclass
 
 # reuse a checkpoint trained via the CLI
 python experiments/05_supcon.py --ckpt runs/mnist_supcon/.../last.ckpt
 ```
+
+JetClass figures are written alongside the MNIST ones with a `_jetclass` suffix.
 
 ## Results (full runs, MNIST test set)
 

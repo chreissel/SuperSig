@@ -22,10 +22,65 @@ import torch
 import lightning as pl
 
 from models.config import DEVICE
+from models.networks import ConvBackbone, SupervisedCNN, JetDeepSets, SupervisedJetNet
+from data.datasets import (
+    MNISTDataModule, ClasswiseMNISTDataModule, TwoViewMNISTDataModule,
+    JetClassDataModule, JetClassClasswiseDataModule, JetClassTwoViewDataModule,
+)
+from data.jetclass_data import N_FEATURES as JET_FEATURES
+
+DATASETS = ("mnist", "jetclass")
 
 
 def default_epochs(quick, full):
     return (1 if quick else full)
+
+
+# --------------------------------------------------------------------------- #
+# Dataset-aware factories: the same test suite, either dataset                 #
+# --------------------------------------------------------------------------- #
+def make_encoder(dataset):
+    """The backbone/encoder appropriate for the dataset (both -> EMB_DIM)."""
+    return ConvBackbone() if dataset == "mnist" else JetDeepSets(input_dim=JET_FEATURES)
+
+
+def make_supervised_net(dataset):
+    """End-to-end supervised network (backbone + classifier) for the dataset."""
+    return SupervisedCNN() if dataset == "mnist" else SupervisedJetNet(input_dim=JET_FEATURES)
+
+
+def plain_dm(dataset, quick, batch_size):
+    """Plain ``(x, y)`` DataModule (supervised training + probes)."""
+    if dataset == "mnist":
+        return MNISTDataModule(quick=quick, batch_size=batch_size)
+    return JetClassDataModule(quick=quick, batch_size=batch_size)
+
+
+def classwise_dm(dataset, quick, batch_size, holdout=None):
+    """``(x, y)`` DataModule that can drop a held-out class from training."""
+    if dataset == "mnist":
+        return ClasswiseMNISTDataModule(quick=quick, holdout=holdout, batch_size=batch_size)
+    return JetClassClasswiseDataModule(quick=quick, holdout=holdout, batch_size=batch_size)
+
+
+def twoview_dm(dataset, quick, batch_size, labeled, holdout=None):
+    """Two-view DataModule (SIGReg-SSL / SupCon), optionally labelled / held-out."""
+    if dataset == "mnist":
+        return TwoViewMNISTDataModule(quick=quick, labeled=labeled, holdout=holdout,
+                                      batch_size=batch_size)
+    return JetClassTwoViewDataModule(quick=quick, labeled=labeled, holdout=holdout,
+                                     batch_size=batch_size)
+
+
+def outfile(dataset, name):
+    """Figure filename, suffixed per dataset so runs don't overwrite each other."""
+    if dataset == "mnist":
+        return name
+    root, ext = os.path.splitext(name)
+    return f"{root}_{dataset}{ext}"
+
+
+CLASS_WORD = {"mnist": "digit", "jetclass": "class"}
 
 
 def make_trainer(max_epochs, quick):

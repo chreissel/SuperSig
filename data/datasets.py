@@ -13,8 +13,9 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 import lightning as pl
 
-from models.config import DATA_DIR, HOLDOUT  # noqa: F401  (HOLDOUT is a handy default)
+from models.config import DATA_DIR, JETCLASS_DIR, HOLDOUT  # noqa: F401  (HOLDOUT is a handy default)
 from . import data_utils as dutils
+from . import jetclass_data as jc
 
 
 class GenericDataModule(pl.LightningDataModule):
@@ -84,7 +85,9 @@ class ClasswiseMNISTDataModule(GenericDataModule):
         print(f"  classwise train images{tag}: {len(self.train_ds)}")
 
     def train_dataloader(self):
-        return DataLoader(self.train_ds, shuffle=True, **self.loader_kwargs)
+        # drop_last: a tiny final batch can have every class below MIN_PER_CLASS,
+        # which makes the class-conditional SIGReg term a no-grad zero.
+        return DataLoader(self.train_ds, shuffle=True, drop_last=True, **self.loader_kwargs)
 
     def val_dataloader(self):
         return DataLoader(self.test_ds, shuffle=False, **self.loader_kwargs)
@@ -125,6 +128,125 @@ class TwoViewMNISTDataModule(GenericDataModule):
         self.val_ds = self._wrap(raw_test, n_test)
         tag = "" if self.holdout is None else f" (no {self.holdout})"
         print(f"  two-view train images{tag}: {len(self.train_ds)}")
+
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, shuffle=True, drop_last=self.labeled,
+                          **self.loader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, shuffle=False, drop_last=self.labeled,
+                          **self.loader_kwargs)
+
+
+# --------------------------------------------------------------------------- #
+# JetClass DataModules                                                         #
+#                                                                             #
+# These mirror the MNIST modules above and yield the *same* batch formats, so  #
+# the (dataset-agnostic) Lightning modules work unchanged:                     #
+#   plain      -> (features, label)                                            #
+#   two-view   -> (view1, view2) or (view1, view2, label)                      #
+# Real JetClass ROOT files are read from JETCLASS_DIR (or `data_dir`) when      #
+# present; otherwise a synthetic toy generator is used so the suite runs        #
+# anywhere.                                                                     #
+# --------------------------------------------------------------------------- #
+class _JetClassBase(GenericDataModule):
+    """Shared JetClass loading (real ROOT files with a toy fallback)."""
+
+    def __init__(self, classes=None, n_particles=jc.N_PARTICLES, quick=False,
+                 data_dir=None, **kwargs):
+        super().__init__(**kwargs)
+        names = classes or jc.JETCLASS_CLASSES
+        self.class_indices = [jc.JETCLASS_CLASSES.index(c) for c in names]
+        self.n_particles = n_particles
+        self.quick = quick
+        self.data_dir = data_dir or JETCLASS_DIR
+
+    def _load(self, split, seed):
+        max_events = (2000 if self.quick else None)
+        real = jc.load_root(self.data_dir, split, self.class_indices,
+                            n_particles=self.n_particles, max_events=max_events)
+        if real is not None:
+            print(f"  jetclass[{split}] real ROOT: {len(real[1])} jets")
+            return real
+        n_per_class = 40 if self.quick else 400
+        X, y = jc.gen_toy_jets(n_per_class, range(len(self.class_indices)),
+                               n_particles=self.n_particles, seed=seed)
+        print(f"  jetclass[{split}] toy: {len(y)} jets "
+              f"({len(self.class_indices)} classes x {n_per_class})")
+        return X, y
+
+
+class JetClassDataModule(_JetClassBase):
+    """Plain JetClass ``(features, label)`` for all requested classes."""
+
+    def setup(self, stage=None):
+        self.train_X, self.train_y = self._load("train", seed=0)
+        self.test_X, self.test_y = self._load("test", seed=1)
+
+    def train_dataloader(self):
+        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
+                          shuffle=True, **self.loader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+                          shuffle=False, **self.loader_kwargs)
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+
+class JetClassClasswiseDataModule(_JetClassBase):
+    """JetClass ``(features, label)``; optionally drops ``holdout`` from training."""
+
+    def __init__(self, holdout=None, **kwargs):
+        super().__init__(**kwargs)
+        self.holdout = holdout
+
+    def setup(self, stage=None):
+        X, y = self._load("train", seed=0)
+        if self.holdout is not None:
+            keep = y != self.holdout
+            X, y = X[keep], y[keep]
+            print(f"  jetclass train without class {self.holdout}: {len(y)} jets")
+        self.train_X, self.train_y = X, y
+        self.test_X, self.test_y = self._load("test", seed=1)
+
+    def train_dataloader(self):
+        # drop_last: see ClasswiseMNISTDataModule -- avoids an all-below-threshold
+        # final batch collapsing the class-conditional SIGReg term to a no-grad zero.
+        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
+                          shuffle=True, drop_last=True, **self.loader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
+                          shuffle=False, **self.loader_kwargs)
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+
+class JetClassTwoViewDataModule(_JetClassBase):
+    """
+    Two augmented views per jet.  ``labeled=True`` also returns the label
+    (SupCon); ``holdout`` optionally removes a class from both splits.
+    """
+
+    def __init__(self, labeled=False, holdout=None, **kwargs):
+        super().__init__(**kwargs)
+        self.labeled = labeled
+        self.holdout = holdout
+
+    def _wrap(self, X, y):
+        if self.holdout is not None:
+            keep = y != self.holdout
+            X, y = X[keep], y[keep]
+        return (jc.TwoViewLabeledJets(X, y) if self.labeled else jc.TwoViewJets(X))
+
+    def setup(self, stage=None):
+        Xtr, ytr = self._load("train", seed=0)
+        Xte, yte = self._load("test", seed=1)
+        self.train_ds = self._wrap(Xtr, ytr)
+        self.val_ds = self._wrap(Xte, yte)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, shuffle=True, drop_last=self.labeled,

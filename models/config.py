@@ -8,6 +8,10 @@ REPO_DIR = os.path.dirname(PKG_DIR)
 # MNIST is downloaded here.  Kept out of the `data/` Python package (which now
 # holds the Lightning DataModules) so the two never collide.
 DATA_DIR = os.path.join(REPO_DIR, "mnist_data")
+# Directory holding the (optional) real JetClass ROOT files; override with the
+# JETCLASS_DIR environment variable.  When absent the JetClass DataModules fall
+# back to a self-contained synthetic ("toy") generator.
+JETCLASS_DIR = os.environ.get("JETCLASS_DIR", os.path.join(REPO_DIR, "jetclass_data"))
 PLOTS_DIR = os.path.join(REPO_DIR, "plots")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 

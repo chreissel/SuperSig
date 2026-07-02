@@ -6,3 +6,8 @@ numpy
 scikit-learn
 matplotlib
 corner
+
+# Only needed to read the real JetClass ROOT files; the JetClass DataModules
+# fall back to a synthetic generator when these (or the files) are absent.
+uproot
+awkward
