@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.metrics import roc_curve, auc
 from sklearn.preprocessing import label_binarize
 
-from .config import N_CLASSES
+from models.config import N_CLASSES
 
 
 def plot_roc(probs, labels, title, out_path):

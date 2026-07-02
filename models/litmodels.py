@@ -1,0 +1,203 @@
+"""
+Lightning modules for every training regime in the study.
+
+Following the phlab-neurips25 convention, all the PyTorch-Lightning boilerplate
+lives here: each module receives its network(s) (encoder / classifier) from the
+YAML config and only implements the train/val steps and the optimizer.  The
+actual objective is delegated to the *unchanged* loss functions in
+``models.losses`` -- these modules never re-implement a loss.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import lightning as pl
+
+from .losses import (
+    sigreg_loss,
+    classwise_sigreg_loss,
+    separation_loss,
+    repulsion_loss,
+    shrink_loss,
+    mean_geometry,
+    make_anchors,
+    supcon_loss,
+)
+
+
+# --------------------------------------------------------------------------- #
+# Supervised baseline                                                          #
+# --------------------------------------------------------------------------- #
+class SupervisedModule(pl.LightningModule):
+    """CNN trained end-to-end with categorical cross-entropy (reference)."""
+
+    def __init__(self, model, lr=1e-3):
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.save_hyperparameters(ignore=["model"])
+
+    def forward(self, x):
+        return self.model(x)
+
+    def _step(self, batch, stage):
+        x, y = batch
+        logits = self.model(x)
+        loss = F.cross_entropy(logits, y)
+        acc = (logits.argmax(1) == y).float().mean()
+        self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
+        self.log(f"{stage}/acc", acc, prog_bar=True, on_step=False, on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, "val")
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+# --------------------------------------------------------------------------- #
+# Self-supervised SIGReg (invariance + global isotropic-Gaussian)             #
+# --------------------------------------------------------------------------- #
+class SIGRegSSLModule(pl.LightningModule):
+    """
+    Two augmented views -> invariance (MSE) + a global isotropic-Gaussian SIGReg
+    term on each view.  The loader is expected to yield ``(view1, view2)``.
+    """
+
+    def __init__(self, encoder, lam=1.0, lr=1e-3):
+        super().__init__()
+        self.encoder = encoder
+        self.lam = lam
+        self.lr = lr
+        self.save_hyperparameters(ignore=["encoder"])
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def _step(self, batch, stage):
+        v1, v2 = batch
+        z1, z2 = self.encoder(v1), self.encoder(v2)
+        inv = F.mse_loss(z1, z2)
+        reg = 0.5 * (sigreg_loss(z1) + sigreg_loss(z2))
+        loss = inv + self.lam * reg
+        self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
+        self.log(f"{stage}/inv", inv, on_step=False, on_epoch=True)
+        self.log(f"{stage}/sigreg", reg, on_step=False, on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, "val")
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+# --------------------------------------------------------------------------- #
+# Class-conditional SIGReg (fixed anchors / learnable means / repulsion)      #
+# --------------------------------------------------------------------------- #
+class ClasswiseSIGRegModule(pl.LightningModule):
+    """
+    Class-conditional SIGReg with a selectable mean-geometry strategy.  The
+    loader yields ``(image, label)``.
+
+    ``mode="fixed"``      : anchors frozen (registered as a buffer), no aux term.
+    ``mode="learnmeans"`` : means are trainable, hinge separation term.
+    ``mode="repulse"``    : means are trainable, inverse-square repulsion + shrink.
+    """
+
+    def __init__(self, encoder, mode="fixed", rep_weight=20.0,
+                 shrink_weight=0.02, beta_sep=0.5, lr=1e-3):
+        super().__init__()
+        if mode not in ("fixed", "learnmeans", "repulse"):
+            raise ValueError(f"unknown mode {mode!r}")
+        self.encoder = encoder
+        self.mode = mode
+        self.rep_weight = rep_weight
+        self.shrink_weight = shrink_weight
+        self.beta_sep = beta_sep
+        self.lr = lr
+
+        anchors = make_anchors()
+        if mode == "fixed":
+            self.register_buffer("means", anchors.clone())
+        else:
+            self.means = nn.Parameter(anchors.clone())
+        self.save_hyperparameters(ignore=["encoder"])
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def _aux(self):
+        if self.mode == "learnmeans":
+            return self.beta_sep * separation_loss(self.means)
+        if self.mode == "repulse":
+            return (self.rep_weight * repulsion_loss(self.means)
+                    + self.shrink_weight * shrink_loss(self.means))
+        return torch.zeros((), device=self.device)
+
+    def _step(self, batch, stage):
+        x, y = batch
+        z = self.encoder(x)
+        reg = classwise_sigreg_loss(z, y, self.means)
+        aux = self._aux()
+        loss = reg + aux
+        self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
+        self.log(f"{stage}/sigreg", reg, on_step=False, on_epoch=True)
+        self.log(f"{stage}/aux", aux, on_step=False, on_epoch=True)
+        if stage == "val":
+            dmin, dmean = mean_geometry(self.means.detach())
+            self.log("val/min_dist", dmin, on_epoch=True)
+            self.log("val/mean_dist", dmean, on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, "val")
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+# --------------------------------------------------------------------------- #
+# Supervised contrastive (supervised SimCLR)                                  #
+# --------------------------------------------------------------------------- #
+class SupConModule(pl.LightningModule):
+    """
+    Supervised contrastive (SupCon) training.  The loader yields
+    ``(view1, view2, label)``; both views are embedded, L2-normalised and passed
+    to the SupCon loss with the labels duplicated across the two views.
+    """
+
+    def __init__(self, encoder, temperature=0.1, lr=1e-3):
+        super().__init__()
+        self.encoder = encoder
+        self.temperature = temperature
+        self.lr = lr
+        self.save_hyperparameters(ignore=["encoder"])
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def _step(self, batch, stage):
+        v1, v2, y = batch
+        z = F.normalize(self.encoder(torch.cat([v1, v2])), dim=1)
+        loss = supcon_loss(z, torch.cat([y, y]), temp=self.temperature)
+        self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, "val")
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)

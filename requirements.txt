@@ -1,5 +1,7 @@
 torch>=2.0
 torchvision>=0.15
+lightning>=2.2
+jsonargparse[signatures]>=4.27
 numpy
 scikit-learn
 matplotlib

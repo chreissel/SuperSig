@@ -5,7 +5,9 @@ import torch
 # Repository layout ---------------------------------------------------------- #
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(PKG_DIR)
-DATA_DIR = os.path.join(REPO_DIR, "data")
+# MNIST is downloaded here.  Kept out of the `data/` Python package (which now
+# holds the Lightning DataModules) so the two never collide.
+DATA_DIR = os.path.join(REPO_DIR, "mnist_data")
 PLOTS_DIR = os.path.join(REPO_DIR, "plots")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 

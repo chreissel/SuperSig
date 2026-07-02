@@ -1,0 +1,37 @@
+# Hold-out-4 class-conditional SIGReg (repulsive means): digit 4 removed from the
+# embedding-training split.  Downstream 4-vs-rest probing is done in experiments/.
+#   python cli.py fit --config configs/mnist_sigreg_holdout4_repulse.yaml
+trainer:
+  accelerator: auto
+  default_root_dir: runs/mnist_sigreg_holdout4_repulse/
+  max_epochs: 8
+  log_every_n_steps: 20
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+  logger:
+    class_path: lightning.pytorch.loggers.CSVLogger
+    init_args:
+      save_dir: runs/mnist_sigreg_holdout4_repulse/
+
+model:
+  class_path: models.litmodels.ClasswiseSIGRegModule
+  init_args:
+    encoder:
+      class_path: models.networks.ConvBackbone
+      init_args:
+        emb_dim: 16
+    mode: repulse
+    rep_weight: 20.0
+    shrink_weight: 0.02
+    lr: 1.0e-3
+
+data:
+  class_path: data.datasets.ClasswiseMNISTDataModule
+  init_args:
+    holdout: 4
+    batch_size: 256
+    num_workers: 2

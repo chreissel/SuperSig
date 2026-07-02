@@ -1,0 +1,36 @@
+# Hold-out-4 SupCon: digit 4 removed from the embedding-training views.
+# Downstream 4-vs-rest probing is done in experiments/.
+#   python cli.py fit --config configs/mnist_supcon_holdout4.yaml
+trainer:
+  accelerator: auto
+  default_root_dir: runs/mnist_supcon_holdout4/
+  max_epochs: 8
+  log_every_n_steps: 20
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+  logger:
+    class_path: lightning.pytorch.loggers.CSVLogger
+    init_args:
+      save_dir: runs/mnist_supcon_holdout4/
+
+model:
+  class_path: models.litmodels.SupConModule
+  init_args:
+    encoder:
+      class_path: models.networks.ConvBackbone
+      init_args:
+        emb_dim: 16
+    temperature: 0.1
+    lr: 1.0e-3
+
+data:
+  class_path: data.datasets.TwoViewMNISTDataModule
+  init_args:
+    labeled: true
+    holdout: 4
+    batch_size: 256
+    num_workers: 2

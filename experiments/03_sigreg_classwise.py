@@ -4,22 +4,22 @@ Class-conditional SIGReg with a chosen mean-geometry strategy, frozen linear pro
 --mode fixed       fixed orthogonal anchors (means not trained)
 --mode learnmeans  learnable means + hinge separation term
 --mode repulse     learnable means + inverse-square repulsion + shrinkage
+
+Canonical training, e.g.:
+    python cli.py fit --config configs/mnist_sigreg_classwise_repulse.yaml
 """
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import numpy as np
 import torch
 import torch.nn as nn
 
-from nllreg.config import plot_path, EMB_DIM, N_CLASSES
-from nllreg.data import get_loaders
-from nllreg.models import ConvBackbone
-from nllreg.losses import make_anchors
-from nllreg.train import (
-    train_sigreg_classwise, train_linear_probe, collect_probs, collect_embeddings,
-)
-from nllreg.plotting import plot_roc, plot_corner
+from common import default_epochs, fit_or_load, frozen_encoder
+from models.config import plot_path, EMB_DIM, N_CLASSES, DEVICE
+from models.networks import ConvBackbone
+from models.litmodels import ClasswiseSIGRegModule
+from data.datasets import MNISTDataModule, ClasswiseMNISTDataModule
+from utils.eval import train_linear_probe, collect_probs, collect_embeddings
+from utils.plotting import plot_roc, plot_corner
 
 TITLES = {
     "fixed": "fixed anchors",
@@ -34,27 +34,27 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--ssl-epochs", type=int, default=None)
     ap.add_argument("--probe-epochs", type=int, default=None)
+    ap.add_argument("--ckpt", type=str, default=None)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
-    ssl_ep = args.ssl_epochs or (2 if args.quick else 8)
-    probe_ep = args.probe_epochs or (1 if args.quick else 4)
+    ssl_ep = args.ssl_epochs or default_epochs(args.quick, 8)
+    probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
 
-    train_loader, test_loader = get_loaders(batch_size=256, quick=args.quick)
+    emb_dm = ClasswiseMNISTDataModule(quick=args.quick, batch_size=256)
+    module = ClasswiseSIGRegModule(ConvBackbone(), mode=args.mode)
+    fit_or_load(module, emb_dm, ssl_ep, args.quick, ckpt=args.ckpt)
+    backbone = frozen_encoder(module)
 
-    means = make_anchors().clone()
-    backbone = ConvBackbone()
-    train_sigreg_classwise(backbone, train_loader, ssl_ep, means,
-                           learn_means=(args.mode != "fixed"), mode=args.mode)
-
-    head = nn.Linear(EMB_DIM, N_CLASSES)
-    train_linear_probe(backbone, head, train_loader, probe_ep)
-    probs, labels = collect_probs(lambda x: head(backbone(x)), test_loader)
+    dm = MNISTDataModule(quick=args.quick, batch_size=256); dm.setup()
+    head = nn.Linear(EMB_DIM, N_CLASSES).to(DEVICE)
+    train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
+    probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels,
              f"Class-conditional SIGReg ({TITLES[args.mode]}) + linear head ROC",
              plot_path(f"roc_sigreg_{args.mode}_linear.png"))
 
-    embs, elab = collect_embeddings(backbone, test_loader)
+    embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(f"corner_sigreg_{args.mode}_16d.png"),
                 title=f"Class-conditional SIGReg ({TITLES[args.mode]}) 16-dim latent")
 

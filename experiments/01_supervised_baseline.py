@@ -1,30 +1,39 @@
-"""Baseline: CNN trained end-to-end with categorical cross-entropy + ROC."""
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+"""Baseline: CNN trained end-to-end with categorical cross-entropy + ROC.
+
+Trains via the Lightning `SupervisedModule` (or loads --ckpt), then evaluates
+on the MNIST test set.  For the canonical training run see:
+    python cli.py fit --config configs/mnist_supervised.yaml
+"""
 import argparse
 import numpy as np
 import torch
 
-from nllreg.config import plot_path
-from nllreg.data import get_loaders
-from nllreg.models import SupervisedCNN
-from nllreg.train import train_supervised, collect_probs
-from nllreg.plotting import plot_roc
+from common import default_epochs, fit_or_load
+from models.config import plot_path, DEVICE
+from models.networks import SupervisedCNN
+from models.litmodels import SupervisedModule
+from data.datasets import MNISTDataModule
+from utils.eval import collect_probs
+from utils.plotting import plot_roc
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--ckpt", type=str, default=None)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
-    epochs = args.epochs or (1 if args.quick else 3)
+    epochs = args.epochs or default_epochs(args.quick, 3)
 
-    train_loader, test_loader = get_loaders(quick=args.quick)
-    model = SupervisedCNN()
-    train_supervised(model, train_loader, epochs)
-    probs, labels = collect_probs(lambda x: model(x), test_loader)
+    dm = MNISTDataModule(quick=args.quick, batch_size=128)
+    module = SupervisedModule(SupervisedCNN())
+    fit_or_load(module, dm, epochs, args.quick, ckpt=args.ckpt)
+
+    dm.setup()
+    model = module.model.to(DEVICE).eval()
+    probs, labels = collect_probs(lambda x: model(x), dm.test_dataloader())
     plot_roc(probs, labels, "MNIST supervised CNN ROC", plot_path("roc_supervised.png"))
 
 
