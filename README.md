@@ -136,8 +136,17 @@ python cli.py fit --config configs/jetclass_supcon.yaml
 python cli.py fit --config configs/jetclass_sigreg_classwise_repulse.yaml
 ```
 
-Checkpoints and logs are written under `runs/<experiment>/`. You can override any
-config value on the command line, e.g. `--trainer.max_epochs 20`.
+Checkpoints are written under `runs/<experiment>/`. You can override any config
+value on the command line, e.g. `--trainer.max_epochs 20`.
+
+### Logging (Weights & Biases)
+
+Every config logs scalar metrics (train/val loss, accuracy, …) to **Weights &
+Biases** under the project **`SuperSIG`**, with the run `name` set to the experiment
+(e.g. `jetclass_supcon`) and `group` set to the dataset (`mnist` / `jetclass`). Log
+in once with `wandb login`; the offline W&B files also land under `runs/<experiment>/`.
+To run without an account, set `WANDB_MODE=offline` (or override the logger, e.g.
+`--trainer.logger lightning.pytorch.loggers.CSVLogger`).
 
 On a SLURM cluster (the setup mirrors phlab-neurips25's Cannon / `iaifi_lab`
 environment) submit the same runs with `submit.sh`, which activates the conda/mamba

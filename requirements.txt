@@ -7,7 +7,9 @@ scikit-learn
 matplotlib
 corner
 
-# Only needed to read the real JetClass ROOT files; the JetClass DataModules
-# fall back to a synthetic generator when these (or the files) are absent.
+# Experiment tracking (the configs log scalar metrics to Weights & Biases).
+wandb
+
+# Needed to read the JetClass ROOT files.
 uproot
 awkward

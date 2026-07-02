@@ -12,8 +12,11 @@ trainer:
         mode: min
         save_last: true
   logger:
-    class_path: lightning.pytorch.loggers.CSVLogger
+    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
+      project: SuperSIG
+      name: mnist_sigreg_classwise_fixed
+      group: mnist
       save_dir: runs/mnist_sigreg_classwise_fixed/
 
 model:

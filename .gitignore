@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 mnist_data/
 runs/
+wandb/
 *.log
 slurm_logs/*
 !slurm_logs/.gitkeep

@@ -18,8 +18,11 @@ trainer:
         mode: min
         save_last: true
   logger:
-    class_path: lightning.pytorch.loggers.CSVLogger
+    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
+      project: SuperSIG
+      name: jetclass_sigreg_classwise_learnmeans
+      group: jetclass
       save_dir: runs/jetclass_sigreg_classwise_learnmeans/
 
 model:
