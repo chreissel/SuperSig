@@ -155,8 +155,9 @@ class _JetClassBase(GenericDataModule):
     def __init__(self, classes=None, n_particles=jc.N_PARTICLES, quick=False,
                  data_dir=None, **kwargs):
         super().__init__(**kwargs)
-        names = classes or jc.JETCLASS_CLASSES
+        names = classes or jc.DEFAULT_CLASSES        # five classes by default
         self.class_indices = [jc.JETCLASS_CLASSES.index(c) for c in names]
+        self.n_classes = len(names)
         self.n_particles = n_particles
         self.quick = quick
         self.data_dir = data_dir or JETCLASS_DIR

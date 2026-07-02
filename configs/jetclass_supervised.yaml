@@ -1,4 +1,5 @@
 # JetClass supervised baseline: DeepSets backbone + classifier, cross-entropy.
+# Five-class embedding training (QCD, Tbqq, Wqq, Zqq, Hbb), mirroring phlab-neurips25.
 #   python cli.py fit --config configs/jetclass_supervised.yaml
 trainer:
   accelerator: auto
@@ -24,12 +25,13 @@ model:
       init_args:
         input_dim: 7
         emb_dim: 16
-        n_classes: 10
+        n_classes: 5
         encoder: deepsets
     lr: 1.0e-3
 
 data:
   class_path: data.datasets.JetClassDataModule
   init_args:
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1

@@ -1,4 +1,4 @@
-# JetClass class-conditional SIGReg (fixed).
+# JetClass class-conditional SIGReg (fixed).  Five-class embedding training.
 #   python cli.py fit --config configs/jetclass_sigreg_classwise_fixed.yaml
 trainer:
   accelerator: auto
@@ -25,10 +25,13 @@ model:
         input_dim: 7   # kinematic features per particle (see data/jetclass_data.py)
         emb_dim: 16
     mode: fixed
+    n_classes: 5
+    emb_dim: 16
     lr: 1.0e-3
 
 data:
   class_path: data.datasets.JetClassClasswiseDataModule
   init_args:
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1

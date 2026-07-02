@@ -27,9 +27,15 @@ from data.datasets import (
     MNISTDataModule, ClasswiseMNISTDataModule, TwoViewMNISTDataModule,
     JetClassDataModule, JetClassClasswiseDataModule, JetClassTwoViewDataModule,
 )
-from data.jetclass_data import N_FEATURES as JET_FEATURES
+from data.jetclass_data import N_FEATURES as JET_FEATURES, DEFAULT_CLASSES as JET_CLASSES
+from models.config import N_CLASSES as MNIST_N_CLASSES
 
 DATASETS = ("mnist", "jetclass")
+
+
+def n_classes(dataset):
+    """Number of classes for the dataset (JetClass uses the 5-class subset)."""
+    return MNIST_N_CLASSES if dataset == "mnist" else len(JET_CLASSES)
 
 
 def default_epochs(quick, full):
@@ -46,7 +52,9 @@ def make_encoder(dataset):
 
 def make_supervised_net(dataset):
     """End-to-end supervised network (backbone + classifier) for the dataset."""
-    return SupervisedCNN() if dataset == "mnist" else SupervisedJetNet(input_dim=JET_FEATURES)
+    if dataset == "mnist":
+        return SupervisedCNN()
+    return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset))
 
 
 def plain_dm(dataset, quick, batch_size):

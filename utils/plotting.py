@@ -9,18 +9,19 @@ from sklearn.preprocessing import label_binarize
 from models.config import N_CLASSES
 
 
-def plot_roc(probs, labels, title, out_path):
+def plot_roc(probs, labels, title, out_path, n_classes=None):
     """One-vs-rest ROC (per class + micro-average) for a multi-class classifier."""
-    y_bin = label_binarize(labels, classes=list(range(N_CLASSES)))
+    n_classes = n_classes or N_CLASSES
+    y_bin = label_binarize(labels, classes=list(range(n_classes)))
     fpr, tpr, roc_auc = {}, {}, {}
-    for i in range(N_CLASSES):
+    for i in range(n_classes):
         fpr[i], tpr[i], _ = roc_curve(y_bin[:, i], probs[:, i])
         roc_auc[i] = auc(fpr[i], tpr[i])
     fpr["micro"], tpr["micro"], _ = roc_curve(y_bin.ravel(), probs.ravel())
     roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
 
     plt.figure(figsize=(7, 7))
-    for i in range(N_CLASSES):
+    for i in range(n_classes):
         plt.plot(fpr[i], tpr[i], lw=1, alpha=0.7, label=f"digit {i} (AUC={roc_auc[i]:.3f})")
     plt.plot(fpr["micro"], tpr["micro"], "k--", lw=2.5,
              label=f"micro-avg (AUC={roc_auc['micro']:.3f})")

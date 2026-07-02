@@ -1,4 +1,4 @@
-# JetClass class-conditional SIGReg (repulse).
+# JetClass class-conditional SIGReg (repulse).  Five-class embedding training.
 #   python cli.py fit --config configs/jetclass_sigreg_classwise_repulse.yaml
 trainer:
   accelerator: auto
@@ -25,6 +25,8 @@ model:
         input_dim: 7   # kinematic features per particle (see data/jetclass_data.py)
         emb_dim: 16
     mode: repulse
+    n_classes: 5
+    emb_dim: 16
     rep_weight: 20.0
     shrink_weight: 0.02
     lr: 1.0e-3
@@ -32,5 +34,6 @@ model:
 data:
   class_path: data.datasets.JetClassClasswiseDataModule
   init_args:
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1

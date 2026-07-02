@@ -1,4 +1,4 @@
-# JetClass supervised contrastive (SupCon) on two augmented jets.
+# JetClass supervised contrastive (SupCon) on two augmented jets.  Five classes.
 #   python cli.py fit --config configs/jetclass_supcon.yaml
 trainer:
   accelerator: auto
@@ -30,6 +30,7 @@ model:
 data:
   class_path: data.datasets.JetClassTwoViewDataModule
   init_args:
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1
     labeled: true

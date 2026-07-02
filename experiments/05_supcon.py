@@ -15,8 +15,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, twoview_dm, outfile, CLASS_WORD, DATASETS)
-from models.config import plot_path, EMB_DIM, N_CLASSES, HOLDOUT, DEVICE
+                    make_encoder, plain_dm, twoview_dm, outfile, n_classes, CLASS_WORD, DATASETS)
+from models.config import plot_path, EMB_DIM, HOLDOUT, DEVICE
 from models.litmodels import SupConModule
 from utils.eval import (
     train_linear_probe, train_binary_probe,
@@ -32,12 +32,13 @@ def run_no_holdout(dataset, quick, ssl_ep, probe_ep):
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 
+    nc = n_classes(dataset)
     dm = plain_dm(dataset, quick, 256); dm.setup()
-    head = nn.Linear(EMB_DIM, N_CLASSES).to(DEVICE)
+    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels, f"Supervised SimCLR (SupCon) + linear head ROC [{dataset}]",
-             plot_path(outfile(dataset, "roc_supcon_linear.png")))
+             plot_path(outfile(dataset, "roc_supcon_linear.png")), n_classes=nc)
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(outfile(dataset, "corner_supcon_16d.png")),
                 title=f"SupCon 16-dim latent space [{dataset}]")

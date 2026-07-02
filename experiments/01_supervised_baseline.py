@@ -9,7 +9,8 @@ import argparse
 import numpy as np
 import torch
 
-from common import default_epochs, fit_or_load, make_supervised_net, plain_dm, outfile, DATASETS
+from common import (default_epochs, fit_or_load, make_supervised_net, plain_dm,
+                    outfile, n_classes, DATASETS)
 from models.config import plot_path, DEVICE
 from models.litmodels import SupervisedModule
 from utils.eval import collect_probs
@@ -36,7 +37,7 @@ def main():
     model = module.model.to(DEVICE).eval()
     probs, labels = collect_probs(lambda x: model(x), dm.test_dataloader())
     plot_roc(probs, labels, f"{args.dataset} supervised ROC",
-             plot_path(outfile(args.dataset, "roc_supervised.png")))
+             plot_path(outfile(args.dataset, "roc_supervised.png")), n_classes=n_classes(args.dataset))
 
 
 if __name__ == "__main__":

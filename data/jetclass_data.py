@@ -2,8 +2,10 @@
 JetClass dataset primitives.
 
 JetClass (Qu, Li & Qian, 2022, https://arxiv.org/abs/2202.03772) is a jet-tagging
-benchmark with **ten** jet classes -- which lines up exactly with the ``N_CLASSES``
-used elsewhere in this repo, so the unchanged loss functions apply directly.
+benchmark with ten jet classes.  Mirroring the reference repo (phlab-neurips25),
+the embedding is trained on a **five-class** subset by default -- QCD, Tbqq
+(ttbar), Wqq, Zqq, Hbb (see ``DEFAULT_CLASSES``).  All ten can be selected by
+passing an explicit ``classes`` list.
 
 Each jet is represented as a fixed-size particle cloud ``[n_particles, n_features]``
 with the standard kinematic feature set computed from the particle four-momenta::
@@ -34,6 +36,13 @@ import torch
 # branches (``label_QCD`` ... ``label_Tbl``).
 JETCLASS_CLASSES = ["QCD", "Hbb", "Hcc", "Hgg", "H4q", "Hqql", "Zqq", "Wqq", "Tbqq", "Tbl"]
 LABEL_BRANCHES = [f"label_{c}" for c in JETCLASS_CLASSES]
+
+# The five classes used for embedding training in the reference repo
+# (phlab-neurips25, configs/jetclass_data_configs/JetClass_full.yaml:
+#  value: [label_QCD, label_Tbqq, label_Wqq, label_Zqq, label_Hbb]).
+# This is the default class set for the JetClass DataModules; the resulting
+# contiguous labels are 0=QCD, 1=Tbqq (ttbar, hadronic top), 2=Wqq, 3=Zqq, 4=Hbb.
+DEFAULT_CLASSES = ["QCD", "Tbqq", "Wqq", "Zqq", "Hbb"]
 P4_BRANCHES = ["part_px", "part_py", "part_pz", "part_energy"]
 
 # Feature layout (indices matter for the augmentation below).

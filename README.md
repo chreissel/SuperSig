@@ -73,12 +73,16 @@ verbatim by the Lightning modules — the modules never re-implement an objectiv
 
 ### Two datasets, one test suite
 
-Every experiment runs on **MNIST** (10 digits) or **JetClass** (10 jet classes)
-— the class count and 16-d embedding line up, so the same losses and Lightning
-modules apply unchanged. Only the *encoder* and *DataModule* differ:
+Every experiment runs on **MNIST** (10 digits) or **JetClass**. Following the
+reference repo, JetClass embeddings are trained on a **five-class** subset —
+`QCD, Tbqq (ttbar), Wqq, Zqq, Hbb` (`data.jetclass_data.DEFAULT_CLASSES`); pass an
+explicit `classes:` list in the config to use all ten. The class count is threaded
+through the probe, the ROC, and the SIGReg class-anchors, so the loss functions
+stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 
 | | MNIST | JetClass |
 |--|-------|----------|
+| classes | 10 digits | 5 (QCD, Tbqq, Wqq, Zqq, Hbb) |
 | input | 28×28 image | particle cloud `[P, 7]` |
 | encoder | `ConvBackbone` | `JetDeepSets` (or `JetTransformer`) |
 | augmentation | affine (two views) | η–φ rotation + pt/angular smearing |

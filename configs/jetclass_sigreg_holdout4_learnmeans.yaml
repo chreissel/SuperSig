@@ -1,4 +1,4 @@
-# JetClass class-conditional SIGReg (learnmeans).
+# JetClass class-conditional SIGReg (learnmeans).  Five-class embedding training.
 #   python cli.py fit --config configs/jetclass_sigreg_holdout4_learnmeans.yaml
 trainer:
   accelerator: auto
@@ -25,12 +25,15 @@ model:
         input_dim: 7   # kinematic features per particle (see data/jetclass_data.py)
         emb_dim: 16
     mode: learnmeans
+    n_classes: 5
+    emb_dim: 16
     beta_sep: 0.5
     lr: 1.0e-3
 
 data:
   class_path: data.datasets.JetClassClasswiseDataModule
   init_args:
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1
     holdout: 4

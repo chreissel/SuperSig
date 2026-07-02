@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import lightning as pl
 
+from . import losses as _losses
+from .config import EMB_DIM, N_CLASSES
 from .losses import (
     sigreg_loss,
     classwise_sigreg_loss,
@@ -19,9 +21,26 @@ from .losses import (
     repulsion_loss,
     shrink_loss,
     mean_geometry,
-    make_anchors,
     supcon_loss,
 )
+
+
+def _make_anchors(n_classes, emb_dim):
+    """
+    Build ``n_classes`` orthogonal anchors of dimension ``emb_dim`` by reusing
+    the unchanged ``losses.make_anchors`` verbatim.
+
+    ``make_anchors`` reads the class/embedding size from module-level names; we
+    temporarily point those at the requested values (restoring them afterwards)
+    so a five-class JetClass run and a ten-class MNIST run both get correctly
+    sized anchors without touching the loss implementation.
+    """
+    prev = (_losses.N_CLASSES, _losses.EMB_DIM)
+    _losses.N_CLASSES, _losses.EMB_DIM = n_classes, emb_dim
+    try:
+        return _losses.make_anchors()
+    finally:
+        _losses.N_CLASSES, _losses.EMB_DIM = prev
 
 
 # --------------------------------------------------------------------------- #
@@ -111,19 +130,21 @@ class ClasswiseSIGRegModule(pl.LightningModule):
     ``mode="repulse"``    : means are trainable, inverse-square repulsion + shrink.
     """
 
-    def __init__(self, encoder, mode="fixed", rep_weight=20.0,
-                 shrink_weight=0.02, beta_sep=0.5, lr=1e-3):
+    def __init__(self, encoder, mode="fixed", n_classes=N_CLASSES, emb_dim=EMB_DIM,
+                 rep_weight=20.0, shrink_weight=0.02, beta_sep=0.5, lr=1e-3):
         super().__init__()
         if mode not in ("fixed", "learnmeans", "repulse"):
             raise ValueError(f"unknown mode {mode!r}")
         self.encoder = encoder
         self.mode = mode
+        self.n_classes = n_classes
+        self.emb_dim = emb_dim
         self.rep_weight = rep_weight
         self.shrink_weight = shrink_weight
         self.beta_sep = beta_sep
         self.lr = lr
 
-        anchors = make_anchors()
+        anchors = _make_anchors(n_classes, emb_dim)
         if mode == "fixed":
             self.register_buffer("means", anchors.clone())
         else:

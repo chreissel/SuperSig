@@ -19,7 +19,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, classwise_dm, outfile, CLASS_WORD, DATASETS)
+                    make_encoder, plain_dm, classwise_dm, outfile, n_classes, CLASS_WORD, DATASETS)
 from models.config import plot_path, EMB_DIM, HOLDOUT, DEVICE
 from models.litmodels import ClasswiseSIGRegModule
 from utils.eval import train_binary_probe, collect_binary_scores, collect_embeddings
@@ -30,7 +30,7 @@ def run_mode(mode, dataset, probe_dm, ssl_ep, probe_ep, quick, ckpt=None):
     word = CLASS_WORD[dataset]
     print(f"\n===== MODE: {mode} (embedding trained WITHOUT {word} {HOLDOUT}) =====")
     emb_dm = classwise_dm(dataset, quick, 256, holdout=HOLDOUT)
-    module = ClasswiseSIGRegModule(make_encoder(dataset), mode=mode)
+    module = ClasswiseSIGRegModule(make_encoder(dataset), mode=mode, n_classes=n_classes(dataset))
     fit_or_load(module, emb_dm, ssl_ep, quick, ckpt=ckpt)
     backbone = frozen_encoder(module)
 

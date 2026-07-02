@@ -17,8 +17,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, classwise_dm, outfile, DATASETS)
-from models.config import plot_path, EMB_DIM, N_CLASSES, DEVICE
+                    make_encoder, plain_dm, classwise_dm, outfile, n_classes, DATASETS)
+from models.config import plot_path, EMB_DIM, DEVICE
 from models.litmodels import ClasswiseSIGRegModule
 from utils.eval import train_linear_probe, collect_probs, collect_embeddings
 from utils.plotting import plot_roc, plot_corner
@@ -45,18 +45,19 @@ def main():
     probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
     bs = 256
 
+    nc = n_classes(args.dataset)
     emb_dm = classwise_dm(args.dataset, args.quick, bs)
-    module = ClasswiseSIGRegModule(make_encoder(args.dataset), mode=args.mode)
+    module = ClasswiseSIGRegModule(make_encoder(args.dataset), mode=args.mode, n_classes=nc)
     fit_or_load(module, emb_dm, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 
     dm = plain_dm(args.dataset, args.quick, bs); dm.setup()
-    head = nn.Linear(EMB_DIM, N_CLASSES).to(DEVICE)
+    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels,
              f"Class-conditional SIGReg ({TITLES[args.mode]}) + linear head ROC [{args.dataset}]",
-             plot_path(outfile(args.dataset, f"roc_sigreg_{args.mode}_linear.png")))
+             plot_path(outfile(args.dataset, f"roc_sigreg_{args.mode}_linear.png")), n_classes=nc)
 
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(outfile(args.dataset, f"corner_sigreg_{args.mode}_16d.png")),

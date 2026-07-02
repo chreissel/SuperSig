@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, twoview_dm, outfile, DATASETS)
-from models.config import plot_path, EMB_DIM, N_CLASSES, DEVICE
+                    make_encoder, plain_dm, twoview_dm, outfile, n_classes, DATASETS)
+from models.config import plot_path, EMB_DIM, DEVICE
 from models.litmodels import SIGRegSSLModule
 from utils.eval import train_linear_probe, collect_probs, collect_embeddings
 from utils.plotting import plot_roc, plot_corner
@@ -38,12 +38,13 @@ def main():
     fit_or_load(module, tv, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 
+    nc = n_classes(args.dataset)
     dm = plain_dm(args.dataset, args.quick, bs); dm.setup()
-    head = nn.Linear(EMB_DIM, N_CLASSES).to(DEVICE)
+    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels, f"SIGReg (SSL) embedding + frozen linear head ROC [{args.dataset}]",
-             plot_path(outfile(args.dataset, "roc_sigreg_linear.png")))
+             plot_path(outfile(args.dataset, "roc_sigreg_linear.png")), n_classes=nc)
 
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(outfile(args.dataset, "corner_sigreg_16d.png")),
