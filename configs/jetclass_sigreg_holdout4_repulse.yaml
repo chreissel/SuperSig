@@ -5,6 +5,11 @@ trainer:
   default_root_dir: runs/jetclass_sigreg_holdout4_repulse/
   max_epochs: 8
   log_every_n_steps: 10
+  # Cap the data seen per epoch, mirroring phlab-neurips25 (only a fraction of the
+  # full JetClass training set is used).  Falls back to using all available
+  # batches when fewer exist (e.g. the small toy fallback).
+  limit_train_batches: 100
+  limit_val_batches: 20
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:

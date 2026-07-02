@@ -105,6 +105,12 @@ a self-contained synthetic ("toy") generator**, so the full suite runs anywhere
 without the ~100 GB download. The `experiments/` scripts take the path the same way —
 `--data-dir /path/to/JetClass` (or the env var).
 
+Mirroring the reference, the JetClass configs cap the data seen per epoch with the
+Lightning trainer settings `limit_train_batches: 100` and `limit_val_batches: 20`
+(the reference uses the same values) — so only a fraction of the full training set is
+used. Adjust or remove those `trainer:` keys in the config to change it. When fewer
+batches exist (e.g. the small toy fallback), Lightning just uses all of them.
+
 ## Usage
 
 ```bash
