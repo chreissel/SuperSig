@@ -48,10 +48,10 @@ model:
 data:
   class_path: data.datasets.JetClassClasswiseDataModule
   init_args:
-    # Path to the real JetClass ROOT files, with train/ val/ test/ subdirs.
-    # The path must contain the ROOT files (a missing path raises a clear error).
-    # (Leave unset to fall back to the JETCLASS_DIR environment variable.)
-    data_dir: jetclass_data/
+    # Base directory holding the JetClass ROOT files, with the
+    # train_100M/ val_5M/ test_20M subdirectories (reference cluster layout).
+    # A missing path raises a clear error; override with $JETCLASS_DIR.
+    data_dir: /n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/
     classes: [QCD, Tbqq, Wqq, Zqq, Hbb]   # five-class subset used for embedding training (mirrors phlab-neurips25)
     batch_size: 256
     num_workers: 1

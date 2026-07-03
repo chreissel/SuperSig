@@ -95,22 +95,23 @@ per-feature **standardization**, a **projection head** for the contrastive objec
 (loss on the projection, the encoder embedding used for probing), and a distinct
 **train / val / test** split.
 
-JetClass data is read from the real ROOT files (via `uproot`). Set the path in the
-config — each `configs/jetclass_*.yaml` has a `data.init_args.data_dir` field
-pointing at a directory with `train/`, `val/`, `test/` subfolders of `*.root` files:
+JetClass data is read from the real ROOT files (via `uproot`). Each
+`configs/jetclass_*.yaml` has a `data.init_args.data_dir` field pointing at the
+JetClass base directory, which must contain the `train_100M/`, `val_5M/`,
+`test_20M/` subfolders of `*.root` files (the reference cluster layout):
 
 ```yaml
 data:
   class_path: data.datasets.JetClassDataModule
   init_args:
-    data_dir: /path/to/JetClass    # real ROOT files (train/ val/ test/)
+    data_dir: /n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/
     classes: [QCD, Tbqq, Wqq, Zqq, Hbb]
 ```
 
-If `data_dir` is left unset it falls back to the `JETCLASS_DIR` environment variable
-(default `jetclass_data/`). The path must contain the ROOT files — a missing path
-raises a clear error. The `experiments/` scripts take the path the same way —
-`--data-dir /path/to/JetClass` (or the env var).
+The default (also `JETCLASS_DIR`'s default) is that cluster path. Override it in the
+config, or with the `JETCLASS_DIR` environment variable, or per-experiment with
+`--data-dir`. A missing path raises a clear error. (A plain `train/ val/ test/`
+layout also works if you point `data_dir` at it.)
 
 Mirroring the reference, the JetClass configs cap the data seen per epoch with the
 Lightning trainer settings `limit_train_batches: 100` and `limit_val_batches: 20`
