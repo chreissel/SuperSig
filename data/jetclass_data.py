@@ -153,10 +153,18 @@ def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
 # --------------------------------------------------------------------------- #
 # JetClass ROOT files (uproot, lazily imported)                                #
 # --------------------------------------------------------------------------- #
+# Subdirectory holding each split on the reference cluster
+# (/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/).
+SPLIT_DIRS = {"train": "train_100M", "val": "val_5M", "test": "test_20M"}
+
+
 def _find_files(data_dir, split):
     if data_dir is None:
         return []
-    for cand in (os.path.join(data_dir, split), data_dir):
+    # Try the cluster subdir (train_100M/...), then a plain split/ dir, then the
+    # directory itself.
+    for sub in (SPLIT_DIRS.get(split, split), split, ""):
+        cand = os.path.join(data_dir, sub) if sub else data_dir
         files = sorted(glob.glob(os.path.join(cand, "**", "*.root"), recursive=True))
         if files:
             return files

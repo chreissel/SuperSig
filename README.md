@@ -50,7 +50,32 @@ stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 | projection head | — | `MLP` on the contrastive modules (SSL / SupCon) |
 | augmentation | affine (two views) | η–φ rotation (features + vectors) + pt smearing |
 
-The JetClass configs cap the data seen per epoch with the
+The JetClass side mirrors the reference closely: the vendored **ParticleTransformer**
+(`models/parT.py`) as the encoder, the full **17 per-particle features** plus the
+`pf_vectors` (px,py,pz,E) used for ParT's pairwise features, the reference's manual
+per-feature **standardization**, a **projection head** for the contrastive objectives
+(loss on the projection, the encoder embedding used for probing), and a distinct
+**train / val / test** split.
+
+JetClass data is read from the real ROOT files (via `uproot`). Each
+`configs/jetclass_*.yaml` has a `data.init_args.data_dir` field pointing at the
+JetClass base directory, which must contain the `train_100M/`, `val_5M/`,
+`test_20M/` subfolders of `*.root` files (the reference cluster layout):
+
+```yaml
+data:
+  class_path: data.datasets.JetClassDataModule
+  init_args:
+    data_dir: /n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/
+    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]
+```
+
+The default (also `JETCLASS_DIR`'s default) is that cluster path. Override it in the
+config, or with the `JETCLASS_DIR` environment variable, or per-experiment with
+`--data-dir`. A missing path raises a clear error. (A plain `train/ val/ test/`
+layout also works if you point `data_dir` at it.)
+
+Mirroring the reference, the JetClass configs cap the data seen per epoch with the
 Lightning trainer settings `limit_train_batches: 100` and `limit_val_batches: 20`
 — so only a fraction of the full training set is
 used. Adjust or remove those `trainer:` keys in the config to change it.

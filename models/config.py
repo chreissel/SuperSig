@@ -8,9 +8,11 @@ REPO_DIR = os.path.dirname(PKG_DIR)
 # MNIST is downloaded here.  Kept out of the `data/` Python package (which now
 # holds the Lightning DataModules) so the two never collide.
 DATA_DIR = os.path.join(REPO_DIR, "mnist_data")
-# Directory holding the JetClass ROOT files; override with the JETCLASS_DIR
-# environment variable.  Must contain train/ val/ test/ subfolders of *.root files.
-JETCLASS_DIR = os.environ.get("JETCLASS_DIR", os.path.join(REPO_DIR, "jetclass_data"))
+# Base directory holding the JetClass ROOT files; override with the JETCLASS_DIR
+# environment variable.  Expected to contain the train_100M/ val_5M/ test_20M
+# subdirectories (the reference cluster layout).
+JETCLASS_DIR = os.environ.get(
+    "JETCLASS_DIR", "/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/")
 PLOTS_DIR = os.path.join(REPO_DIR, "plots")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 

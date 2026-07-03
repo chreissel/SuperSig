@@ -168,8 +168,9 @@ class _JetClassBase(GenericDataModule):
         if out is None:
             raise FileNotFoundError(
                 f"No JetClass ROOT files for split '{split}' under {self.data_dir!r}. "
-                f"Set data_dir (or the JETCLASS_DIR env var) to a directory with "
-                f"train/ val/ test/ subfolders of *.root files.")
+                f"Set data_dir (or the JETCLASS_DIR env var) to the JetClass base "
+                f"directory containing train_100M/ val_5M/ test_20M subfolders of "
+                f"*.root files.")
         print(f"  jetclass[{split}] ROOT: {len(out[1])} jets")
         return out
 
