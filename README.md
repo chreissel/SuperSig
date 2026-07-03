@@ -1,6 +1,6 @@
-# SuperSig
+# SuperSIG
 
-Learning structured 16-dimensional MNIST embeddings with **SIGReg** (Sketched
+Learning structured embeddings with **SIGReg** (Sketched
 Isotropic Gaussian Regularization) and **supervised contrastive learning (SupCon /
 supervised SimCLR)**, then evaluating them with frozen linear probes, ROC curves, and
 corner plots of the latent space.
@@ -11,8 +11,7 @@ negative-log-likelihood style regularizer — rather than relying only on a
 discriminative loss. Every embedding is trained, then **frozen**, and a single linear
 layer is trained on top with categorical cross-entropy.
 
-The project is organized around **PyTorch Lightning**, following the structure of
-[phlab-neurips25](https://github.com/sambt/phlab-neurips25): a training run is fully
+The project is organized around **PyTorch Lightning**: a training run is fully
 described by a YAML config passed to the Lightning CLI (`cli.py`), which wires
 together a `LightningModule` (the objective), a `LightningDataModule` (the data +
 augmentations), and the trainer / logger / checkpointing settings.
@@ -21,55 +20,18 @@ augmentations), and the trainer / logger / checkpointing settings.
 
 | Embedding | Idea |
 |-----------|------|
-| Supervised baseline | CNN trained end-to-end with cross-entropy (reference) |
+| Supervised baseline | Cross-entropy (reference) |
 | SIGReg (SSL) | invariance between two augmented views + a global isotropic-Gaussian SIGReg term (no labels) |
-| Class-conditional SIGReg | SIGReg applied per class, pulling each digit to `N(mean_c, I)` |
+| Class-conditional SIGReg | SIGReg applied per class |
 | &nbsp;&nbsp;· fixed anchors | class means fixed at orthogonal anchors |
 | &nbsp;&nbsp;· learnable means | means trained, kept apart by a **hinge separation** term |
 | &nbsp;&nbsp;· repulsive means | means trained, kept apart by an **inverse-square repulsion** + shrinkage |
 | SupCon | supervised contrastive loss on two augmented views |
 
 Two evaluation protocols:
-- **Closed-set:** embedding on all digits → 10-way linear probe → one-vs-rest ROC.
-- **Hold-out-4:** embedding trained *without* digit 4 → frozen → binary "4 vs rest"
+- **Closed-set:** embedding on all classes → 10-way linear probe → one-vs-rest ROC.
+- **Hold-out:** embedding trained *without* certain class → frozen → binary classification
   linear probe. Tests whether an unseen class still lands in its own latent region.
-
-## Layout
-
-```
-cli.py                 LightningCLI entrypoint (python cli.py fit --config ...)
-submit.sh              SLURM wrapper for the Cannon / iaifi_lab cluster (sbatch submit.sh <config>)
-configs/               one YAML per experiment (model + data + trainer)
-  mnist_*.yaml         supervised / sigreg_ssl / sigreg_classwise_* /
-                       sigreg_holdout4_* / supcon / supcon_holdout4
-  jetclass_*.yaml      the same nine experiments on JetClass
-models/                networks, losses, and Lightning modules
-  config.py            paths, constants, device
-  networks.py          ConvBackbone, SupervisedCNN  (MNIST)
-                       ParticleTransformerModel, SupervisedJetNet, MLP  (JetClass)
-  losses.py            sigreg, class-conditional sigreg, separation/repulsion, supcon
-  litmodels.py         LightningModules (SupervisedModule, SIGRegSSLModule,
-                       ClasswiseSIGRegModule, SupConModule) — dataset-agnostic
-data/                  Lightning DataModules
-  data_utils.py        MNIST transforms + two-view datasets
-  jetclass_data.py     JetClass features, ROOT loader (uproot),
-                       jet augmentation, two-view datasets
-  datasets.py          MNIST + JetClass DataModules (same batch formats)
-utils/                 kept out of the Lightning code paths
-  plotting.py          ROC and corner-plot helpers
-  eval.py              frozen linear/binary probes + collectors
-experiments/           downstream analysis scripts (train/load → probe → plot)
-  common.py                dataset-aware factories (--dataset mnist|jetclass)
-  01_supervised_baseline.py
-  02_sigreg_ssl.py
-  03_sigreg_classwise.py   --mode fixed|learnmeans|repulse
-  04_holdout4.py           --mode learnmeans|repulse|both
-  05_supcon.py
-plots/                 all generated figures
-```
-
-The loss functions in `models/losses.py` are the heart of the study and are used
-verbatim by the Lightning modules — the modules never re-implement an objective.
 
 ### Two datasets, one test suite
 
@@ -115,7 +77,7 @@ layout also works if you point `data_dir` at it.)
 
 Mirroring the reference, the JetClass configs cap the data seen per epoch with the
 Lightning trainer settings `limit_train_batches: 100` and `limit_val_batches: 20`
-(the reference uses the same values) — so only a fraction of the full training set is
+— so only a fraction of the full training set is
 used. Adjust or remove those `trainer:` keys in the config to change it.
 
 ## Usage
@@ -140,17 +102,7 @@ python cli.py fit --config configs/jetclass_sigreg_classwise_repulse.yaml
 Checkpoints are written under `runs/<experiment>/`. You can override any config
 value on the command line, e.g. `--trainer.max_epochs 20`.
 
-### Logging (Weights & Biases)
-
-Every config logs scalar metrics (train/val loss, accuracy, …) to **Weights &
-Biases** under the project **`SuperSIG`**, with the run `name` set to the experiment
-(e.g. `jetclass_supcon`) and `group` set to the dataset (`mnist` / `jetclass`). Log
-in once with `wandb login`; the offline W&B files also land under `runs/<experiment>/`.
-To run without an account, set `WANDB_MODE=offline` (or override the logger, e.g.
-`--trainer.logger lightning.pytorch.loggers.CSVLogger`).
-
-On a SLURM cluster (the setup mirrors phlab-neurips25's Cannon / `iaifi_lab`
-environment) submit the same runs with `submit.sh`, which activates the conda/mamba
+On a SLURM cluster submit the same runs with `submit.sh`, which activates the conda/mamba
 env and runs `cli.py fit` on one GPU (logs go to `slurm_logs/`):
 
 ```bash
