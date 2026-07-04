@@ -116,7 +116,9 @@ def make_trainer(max_epochs, quick):
 def fit_or_load(module, datamodule, max_epochs, quick, ckpt=None):
     """Train ``module`` on ``datamodule`` for ``max_epochs`` epochs, or load ``ckpt``."""
     if ckpt is not None:
-        state = torch.load(ckpt, map_location="cpu")
+        # weights_only=False: Lightning checkpoints also pickle hyperparameters etc.
+        # (torch>=2.6 defaults weights_only=True, which rejects them).
+        state = torch.load(ckpt, map_location="cpu", weights_only=False)
         module.load_state_dict(state["state_dict"] if "state_dict" in state else state)
         print(f"  loaded checkpoint {ckpt}")
     else:
