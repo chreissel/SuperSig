@@ -64,28 +64,43 @@ def make_supervised_net(dataset):
     return SupervisedJetNet(input_dim=JET_FEATURES, n_classes=n_classes(dataset))
 
 
-def plain_dm(dataset, quick, batch_size, data_dir=None):
+def _jet_kwargs(quick, batch_size, data_dir, num_workers, max_files_per_class):
+    # JetClass streams via weaver; default to a single in-process worker
+    # (num_workers=0) so several parallel weaver streams can't exhaust memory on a
+    # constrained node.  `max_files_per_class` bounds how much of the split the
+    # downstream probe/eval reads (None = everything).
+    kw = dict(quick=quick, batch_size=batch_size, data_dir=data_dir,
+              num_workers=(0 if num_workers is None else num_workers))
+    if max_files_per_class is not None:
+        kw["max_files_per_class"] = max_files_per_class
+    return kw
+
+
+def plain_dm(dataset, quick, batch_size, data_dir=None, num_workers=None, max_files_per_class=None):
     """Plain ``(x, y)`` DataModule (supervised training + probes)."""
     if dataset == "mnist":
         return MNISTDataModule(quick=quick, batch_size=batch_size)
-    return JetClassDataModule(quick=quick, batch_size=batch_size, data_dir=data_dir)
+    return JetClassDataModule(**_jet_kwargs(quick, batch_size, data_dir, num_workers, max_files_per_class))
 
 
-def classwise_dm(dataset, quick, batch_size, holdout=None, data_dir=None):
+def classwise_dm(dataset, quick, batch_size, holdout=None, data_dir=None,
+                 num_workers=None, max_files_per_class=None):
     """``(x, y)`` DataModule that can drop a held-out class from training."""
     if dataset == "mnist":
         return ClasswiseMNISTDataModule(quick=quick, holdout=holdout, batch_size=batch_size)
-    return JetClassClasswiseDataModule(quick=quick, holdout=holdout, batch_size=batch_size,
-                                       data_dir=data_dir)
+    return JetClassClasswiseDataModule(
+        holdout=holdout, **_jet_kwargs(quick, batch_size, data_dir, num_workers, max_files_per_class))
 
 
-def twoview_dm(dataset, quick, batch_size, labeled, holdout=None, data_dir=None):
+def twoview_dm(dataset, quick, batch_size, labeled, holdout=None, data_dir=None,
+               num_workers=None, max_files_per_class=None):
     """Two-view DataModule (SIGReg-SSL / SupCon), optionally labelled / held-out."""
     if dataset == "mnist":
         return TwoViewMNISTDataModule(quick=quick, labeled=labeled, holdout=holdout,
                                       batch_size=batch_size)
-    return JetClassTwoViewDataModule(quick=quick, labeled=labeled, holdout=holdout,
-                                     batch_size=batch_size, data_dir=data_dir)
+    return JetClassTwoViewDataModule(
+        labeled=labeled, holdout=holdout,
+        **_jet_kwargs(quick, batch_size, data_dir, num_workers, max_files_per_class))
 
 
 def outfile(dataset, name):

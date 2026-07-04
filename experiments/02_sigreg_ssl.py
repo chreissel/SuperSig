@@ -29,6 +29,10 @@ def main():
     ap.add_argument("--ckpt", type=str, default=None)
     ap.add_argument("--data-dir", type=str, default=None,
                     help="JetClass ROOT directory (falls back to $JETCLASS_DIR)")
+    ap.add_argument("--num-workers", type=int, default=None,
+                    help="JetClass DataLoader workers (default 0; >0 needs more RAM)")
+    ap.add_argument("--max-files-per-class", type=int, default=None,
+                    help="cap JetClass ROOT files per class for the probe/eval (default: all)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -36,13 +40,13 @@ def main():
     probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
     bs = 128 if args.dataset == "mnist" else 256
 
-    tv = twoview_dm(args.dataset, args.quick, 256, labeled=False, data_dir=args.data_dir)
+    tv = twoview_dm(args.dataset, args.quick, 256, labeled=False, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
     module = SIGRegSSLModule(make_encoder(args.dataset), projector=make_projector(args.dataset))
     fit_or_load(module, tv, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 
     nc = n_classes(args.dataset)
-    dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir); dm.setup()
+    dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class); dm.setup()
     head = nn.Linear(EMB_DIM, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
