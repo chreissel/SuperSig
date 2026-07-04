@@ -10,6 +10,8 @@ corner
 # Experiment tracking (the configs log scalar metrics to Weights & Biases).
 wandb
 
-# Needed to read the JetClass ROOT files.
+# JetClass dataloading (vendored weaver SimpleIterDataset stack under data/jetclass/).
 uproot
 awkward
+PyYAML
+tqdm

@@ -100,8 +100,12 @@ class ParticleTransformerModel(nn.Module):
 
     def forward(self, x):                                    # x: [B, P, C]
         feats = x[..., :self.input_dim].transpose(1, 2)             # [B, F, P]
-        vectors = x[..., self.input_dim:self.input_dim + self.pair_input_dim].transpose(1, 2)
-        mask = (x.abs().sum(-1) > 0).unsqueeze(1).float()          # [B, 1, P]
+        mi = self.input_dim + self.pair_input_dim
+        vectors = x[..., self.input_dim:mi].transpose(1, 2)        # [B, 4, P]
+        if x.shape[-1] > mi:                                        # explicit mask channel
+            mask = x[..., mi].unsqueeze(1).float()                 # [B, 1, P]
+        else:                                                      # fall back to nonzero
+            mask = (x.abs().sum(-1) > 0).unsqueeze(1).float()
         return self.model(feats, v=vectors, mask=mask)
 
 
