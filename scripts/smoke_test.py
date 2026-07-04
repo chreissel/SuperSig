@@ -118,7 +118,9 @@ def _synth_jetclass(base):
             return ak.Array([rng.normal(0, s, int(c)).tolist() for c in counts])
 
         px, py, pz = jag(20), jag(20), jag(40)
-        en = ak.Array([(np.abs(rng.normal(0, 50, int(c))) + 1).tolist() for c in counts])
+        # physical (timelike) energy E >= |p| so ParT's pairwise log(m^2) is finite
+        en = ak.Array([np.sqrt(np.asarray(a) ** 2 + np.asarray(b) ** 2 + np.asarray(c) ** 2) + 0.1
+                       for a, b, c in zip(px.tolist(), py.tolist(), pz.tolist())])
         d = {"part_px": px, "part_py": py, "part_pz": pz, "part_energy": en,
              "part_deta": jag(0.3), "part_dphi": jag(0.3), "part_d0val": jag(0.1),
              "part_d0err": jag(0.1), "part_dzval": jag(0.1), "part_dzerr": jag(0.1),

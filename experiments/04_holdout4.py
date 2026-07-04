@@ -26,10 +26,11 @@ from utils.eval import train_binary_probe, collect_binary_scores, collect_embedd
 from utils.plotting import plot_binary_roc, plot_corner
 
 
-def run_mode(mode, dataset, probe_dm, ssl_ep, probe_ep, quick, ckpt=None, data_dir=None):
+def run_mode(mode, dataset, probe_dm, ssl_ep, probe_ep, quick, ckpt=None, data_dir=None,
+             num_workers=None, max_files_per_class=None):
     word = CLASS_WORD[dataset]
     print(f"\n===== MODE: {mode} (embedding trained WITHOUT {word} {HOLDOUT}) =====")
-    emb_dm = classwise_dm(dataset, quick, 256, holdout=HOLDOUT, data_dir=data_dir)
+    emb_dm = classwise_dm(dataset, quick, 256, holdout=HOLDOUT, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
     module = ClasswiseSIGRegModule(make_encoder(dataset), mode=mode, n_classes=n_classes(dataset))
     fit_or_load(module, emb_dm, ssl_ep, quick, ckpt=ckpt)
     backbone = frozen_encoder(module)
@@ -61,6 +62,10 @@ def main():
     ap.add_argument("--ckpt", type=str, default=None)
     ap.add_argument("--data-dir", type=str, default=None,
                     help="JetClass ROOT directory (falls back to $JETCLASS_DIR)")
+    ap.add_argument("--num-workers", type=int, default=None,
+                    help="JetClass DataLoader workers (default 0; >0 needs more RAM)")
+    ap.add_argument("--max-files-per-class", type=int, default=None,
+                    help="cap JetClass ROOT files per class for the probe/eval (default: all)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -68,10 +73,10 @@ def main():
     probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
 
     # Probe/test on all classes (probe is trained with the held-out class present).
-    probe_dm = plain_dm(args.dataset, args.quick, 256, data_dir=args.data_dir); probe_dm.setup()
+    probe_dm = plain_dm(args.dataset, args.quick, 256, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class); probe_dm.setup()
     modes = ["repulse", "learnmeans"] if args.mode == "both" else [args.mode]
     results = {m: run_mode(m, args.dataset, probe_dm, ssl_ep, probe_ep, args.quick,
-                           ckpt=args.ckpt if len(modes) == 1 else None, data_dir=args.data_dir)
+                           ckpt=args.ckpt if len(modes) == 1 else None, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
                for m in modes}
 
     if len(results) > 1:
