@@ -182,24 +182,26 @@ class _JetClassBase(GenericDataModule):
             fd.pop(drop_class, None)
         return fd
 
-    def _loader(self, file_dict, mode, for_training, drop_last=False):
-        ds = jc.make_iter_dataset(file_dict, self.data_config,
-                                  for_training=for_training, fetch_step=self.fetch_step)
-        return DataLoader(jc.JetClassAdapter(ds, mode=mode), drop_last=drop_last,
-                          **self.loader_kwargs)
+    def _loader(self, file_dict, mode, for_training, split, drop_last=False):
+        ds = jc.make_iter_dataset(file_dict, self.data_config, for_training=for_training,
+                                  fetch_step=self.fetch_step, name=split)
+        kwargs = dict(self.loader_kwargs)
+        if kwargs.get("num_workers", 0) > 0:                # matches the reference
+            kwargs["persistent_workers"] = True
+        return DataLoader(jc.JetClassAdapter(ds, mode=mode), drop_last=drop_last, **kwargs)
 
 
 class JetClassDataModule(_JetClassBase):
     """Plain JetClass ``(features, label)`` for all requested classes."""
 
     def train_dataloader(self):
-        return self._loader(self._file_dict("train"), "plain", for_training=True)
+        return self._loader(self._file_dict("train"), "plain", for_training=True, split="train")
 
     def val_dataloader(self):
-        return self._loader(self._file_dict("val"), "plain", for_training=True)
+        return self._loader(self._file_dict("val"), "plain", for_training=True, split="val")
 
     def test_dataloader(self):
-        return self._loader(self._file_dict("test"), "plain", for_training=False)
+        return self._loader(self._file_dict("test"), "plain", for_training=False, split="test")
 
 
 class JetClassClasswiseDataModule(_JetClassBase):
@@ -213,13 +215,13 @@ class JetClassClasswiseDataModule(_JetClassBase):
         # drop_last: a tiny final batch can have every class below MIN_PER_CLASS,
         # collapsing the class-conditional SIGReg term to a no-grad zero.
         fd = self._file_dict("train", drop_class=self._holdout_name(self.holdout))
-        return self._loader(fd, "plain", for_training=True, drop_last=True)
+        return self._loader(fd, "plain", for_training=True, split="train", drop_last=True)
 
     def val_dataloader(self):
-        return self._loader(self._file_dict("val"), "plain", for_training=True)
+        return self._loader(self._file_dict("val"), "plain", for_training=True, split="val")
 
     def test_dataloader(self):
-        return self._loader(self._file_dict("test"), "plain", for_training=False)
+        return self._loader(self._file_dict("test"), "plain", for_training=False, split="test")
 
 
 class JetClassTwoViewDataModule(_JetClassBase):
@@ -236,8 +238,8 @@ class JetClassTwoViewDataModule(_JetClassBase):
 
     def train_dataloader(self):
         fd = self._file_dict("train", drop_class=self._holdout_name(self.holdout))
-        return self._loader(fd, self.mode, for_training=True, drop_last=self.labeled)
+        return self._loader(fd, self.mode, for_training=True, split="train", drop_last=self.labeled)
 
     def val_dataloader(self):
         fd = self._file_dict("val", drop_class=self._holdout_name(self.holdout))
-        return self._loader(fd, self.mode, for_training=True, drop_last=self.labeled)
+        return self._loader(fd, self.mode, for_training=True, split="val", drop_last=self.labeled)

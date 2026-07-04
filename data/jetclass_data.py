@@ -92,8 +92,14 @@ def build_file_dict(data_dir, split, class_names, max_files_per_class=None):
 
 
 def make_iter_dataset(file_dict, data_config, for_training, fetch_step=0.01,
-                      file_fraction=1, load_fraction=1, name=""):
-    """Construct a weaver ``SimpleIterDataset`` (streaming, bounded memory)."""
+                      file_fraction=1, load_fraction=1, name="", async_load=True):
+    """
+    Construct a weaver ``SimpleIterDataset`` (streaming, bounded memory) with the
+    reference's settings (``fetch_by_files=False``, ``fetch_step=0.01``,
+    ``file_fraction=1``, ``load_range_and_fraction=((0,1),1)``, ``remake_weights=True``,
+    ``async_load=True``).  With the vendored config having no ``weights`` section,
+    ``remake_weights`` is a no-op (no reweighting is applied).
+    """
     return SimpleIterDataset(
         file_dict, data_config,
         for_training=for_training,
@@ -101,8 +107,8 @@ def make_iter_dataset(file_dict, data_config, for_training, fetch_step=0.01,
         fetch_by_files=False,
         fetch_step=fetch_step,
         file_fraction=file_fraction,
-        remake_weights=False,
-        async_load=False,
+        remake_weights=True,
+        async_load=async_load,
         infinity_mode=False,
         in_memory=False,
         name=name,
