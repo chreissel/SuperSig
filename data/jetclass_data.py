@@ -24,7 +24,11 @@ encoders use to build the particle mask.
 
 The official JetClass ROOT files are read with ``uproot`` (lazy import) from
 ``JETCLASS_DIR`` (or a directory passed to the DataModule); PID / impact-parameter
-branches are used when present.
+branches are used when present.  Reading is **streaming** (``JetStream``, an
+``IterableDataset``): files are read lazily in chunks, round-robin across classes,
+with a bounded shuffle buffer -- the memory-safe analogue of the reference's weaver
+``SimpleIterDataset``, so peak memory does not grow with the (up to ~100M-jet)
+split size.
 
 The two-view augmentation (SIGReg-SSL / SupCon) is an eta-phi rotation of the
 relative coordinates plus mild pt smearing; the same azimuthal rotation is applied
@@ -157,85 +161,67 @@ def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
 # (/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/).
 SPLIT_DIRS = {"train": "train_100M", "val": "val_5M", "test": "test_20M"}
 
+# JetClass files are single-class, named by a per-class prefix; this lets us read
+# a bounded, class-balanced subset instead of loading the whole (~100M-jet) split.
+CLASS_FILE_HEADERS = {
+    "QCD": "ZJetsToNuNu", "Hbb": "HToBB", "Hcc": "HToCC", "Hgg": "HToGG",
+    "H4q": "HToWW4Q", "Hqql": "HToWW2Q1L", "Zqq": "ZToQQ", "Wqq": "WToQQ",
+    "Tbqq": "TTBar", "Tbl": "TTBarLep",
+}
 
-def _find_files(data_dir, split):
+_BRANCH_ALIAS = {
+    "part_charge": "charge", "part_isChargedHadron": "isChargedHadron",
+    "part_isNeutralHadron": "isNeutralHadron", "part_isPhoton": "isPhoton",
+    "part_isElectron": "isElectron", "part_isMuon": "isMuon",
+    "part_d0val": "d0val", "part_d0err": "d0err",
+    "part_dzval": "dzval", "part_dzerr": "dzerr",
+}
+
+
+def _split_dir(data_dir, split):
+    """Resolve the directory for a split (train_100M / plain split/ / data_dir)."""
     if data_dir is None:
-        return []
-    # Try the cluster subdir (train_100M/...), then a plain split/ dir, then the
-    # directory itself.
+        return None
     for sub in (SPLIT_DIRS.get(split, split), split, ""):
         cand = os.path.join(data_dir, sub) if sub else data_dir
-        files = sorted(glob.glob(os.path.join(cand, "**", "*.root"), recursive=True))
-        if files:
-            return files
-    return []
+        if os.path.isdir(cand) and glob.glob(os.path.join(cand, "**", "*.root"), recursive=True):
+            return cand
+    return None
 
 
-def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
-              max_events=None, max_files=None):
-    """
-    Load JetClass jets for ``split`` (``train`` / ``val`` / ``test``).
-
-    Returns ``(X, y)`` tensors, or ``None`` if no ROOT files are found under
-    ``data_dir`` (the DataModule turns that into a clear error).
-    """
-    files = _find_files(data_dir, split)
-    if not files:
-        return None
-    if max_files:
-        files = files[:max_files]
-
-    import uproot          # lazy: only needed for the real dataset
+def _arr_to_features(arr, n_particles):
+    """Turn one awkward chunk (a record of jagged branches) into ``[n, P, 21]``."""
     import awkward as ak
+    fields = set(arr.fields)
 
-    keep = set(int(c) for c in class_indices)
-    label_cols = [LABEL_BRANCHES[c] for c in class_indices]
-    remap = {c: i for i, c in enumerate(class_indices)}   # original -> contiguous
+    def pad(branch):
+        a = ak.pad_none(arr[branch], n_particles, clip=True)
+        return ak.to_numpy(ak.fill_none(a, 0.0)).astype(np.float64)
 
-    Xs, ys, n_seen = [], [], 0
-    for path in files:
-        f = uproot.open(path)
-        tree = f["tree"] if "tree" in f else f[f.keys(recursive=False)[0]]
-        avail = set(tree.keys())
-        want = P4_BRANCHES + [b for b in EXTRA_BRANCHES if b in avail]
-        arr = tree.arrays(want + label_cols, library="ak")
+    kwargs = {_BRANCH_ALIAS[b]: pad(b) for b in EXTRA_BRANCHES if b in fields}
+    return compute_features(pad("part_px"), pad("part_py"), pad("part_pz"),
+                            pad("part_energy"), **kwargs)
 
-        onehot = np.stack([ak.to_numpy(arr[b]).astype(np.int64) for b in label_cols], axis=1)
-        cls_local = onehot.argmax(axis=1)
-        has_label = onehot.sum(axis=1) > 0
-        cls_orig = np.array([class_indices[i] for i in cls_local])
-        sel = has_label & np.array([int(c) in keep for c in cls_orig])
-        if not sel.any():
-            continue
 
-        def pad(branch):
-            a = arr[branch][sel]
-            a = ak.pad_none(a, n_particles, clip=True)
-            return ak.to_numpy(ak.fill_none(a, 0.0)).astype(np.float64)
-
-        # map branch names -> compute_features kwargs
-        kwargs = {}
-        alias = {"part_charge": "charge", "part_isChargedHadron": "isChargedHadron",
-                 "part_isNeutralHadron": "isNeutralHadron", "part_isPhoton": "isPhoton",
-                 "part_isElectron": "isElectron", "part_isMuon": "isMuon",
-                 "part_d0val": "d0val", "part_d0err": "d0err",
-                 "part_dzval": "dzval", "part_dzerr": "dzerr"}
-        for b in EXTRA_BRANCHES:
-            if b in avail:
-                kwargs[alias[b]] = pad(b)
-
-        X = compute_features(pad("part_px"), pad("part_py"), pad("part_pz"),
-                             pad("part_energy"), **kwargs)
-        y = np.array([remap[int(c)] for c in cls_orig[sel]], dtype=np.int64)
-        Xs.append(X); ys.append(y); n_seen += len(y)
-        if max_events and n_seen >= max_events:
-            break
-
-    if not Xs:
+def class_file_dict(data_dir, split, class_indices, max_files_per_class=None):
+    """
+    Map each requested class (as a contiguous label 0..N-1) to its ROOT files for
+    ``split``.  Cheap -- only globs filenames, reads nothing.  Returns ``None`` if
+    no files are found (the DataModule turns that into a clear error).
+    """
+    split_dir = _split_dir(data_dir, split)
+    if split_dir is None:
         return None
-    X = np.concatenate(Xs)[:max_events] if max_events else np.concatenate(Xs)
-    y = np.concatenate(ys)[:max_events] if max_events else np.concatenate(ys)
-    return torch.from_numpy(X), torch.from_numpy(y)
+    out = {}
+    for label, ci in enumerate(class_indices):
+        header = CLASS_FILE_HEADERS[JETCLASS_CLASSES[ci]]
+        files = sorted(glob.glob(os.path.join(split_dir, "**", f"{header}_*.root"),
+                                 recursive=True))
+        if max_files_per_class:
+            files = files[:max_files_per_class]
+        if files:
+            out[label] = files
+    return out or None
 
 
 # --------------------------------------------------------------------------- #
@@ -273,40 +259,94 @@ class JetAugment:
         return feats * mask                                 # keep padded slots zero
 
 
-class JetDataset(torch.utils.data.Dataset):
-    """Plain ``(features, label)`` jets."""
+class JetStream(torch.utils.data.IterableDataset):
+    """
+    Streaming JetClass dataset (the memory-safe analogue of the reference's weaver
+    ``SimpleIterDataset``).  ROOT files are read lazily in chunks with ``uproot``,
+    round-robin across classes so batches stay class-balanced, and buffered/shuffled
+    with a bounded shuffle buffer -- so peak memory is O(buffer), independent of the
+    (up to ~100M-jet) split size.  Per-sample output matches the map-style loaders:
 
-    def __init__(self, X, y):
-        self.X, self.y = X, y
+        mode="plain"           -> (features[P,21], label)
+        mode="twoview"         -> (view1, view2)
+        mode="twoview_labeled" -> (view1, view2, label)
 
-    def __len__(self):
-        return len(self.y)
+    ``files_by_class`` maps a contiguous label to its list of ROOT files.
+    """
 
-    def __getitem__(self, i):
-        return self.X[i], int(self.y[i])
+    def __init__(self, files_by_class, n_particles=N_PARTICLES, mode="plain", aug=None,
+                 chunk_size=10000, shuffle_buffer=20000, shuffle=True, seed=0):
+        super().__init__()
+        self.files_by_class = files_by_class
+        self.n_particles = n_particles
+        self.mode = mode
+        self.aug = aug or JetAugment()
+        self.chunk_size = chunk_size
+        self.shuffle_buffer = shuffle_buffer
+        self.shuffle = shuffle
+        self.seed = seed
+        self._epoch = 0
 
+    def _class_chunks(self, files):
+        import uproot          # lazy: only needed for the real dataset
+        for path in files:
+            f = uproot.open(path)
+            tree = f["tree"] if "tree" in f else f[f.keys(recursive=False)[0]]
+            avail = set(tree.keys())
+            want = P4_BRANCHES + [b for b in EXTRA_BRANCHES if b in avail]
+            for arr in tree.iterate(want, step_size=self.chunk_size, library="ak"):
+                yield _arr_to_features(arr, self.n_particles)
 
-class TwoViewJets(torch.utils.data.Dataset):
-    """Two augmented views of each jet (no label)."""
+    def _round_robin(self, file_rng):
+        """Yield (label, chunk) round-robin across classes (shared order across workers)."""
+        gens = {}
+        for label, files in self.files_by_class.items():
+            fl = list(files)
+            if self.shuffle:
+                file_rng.shuffle(fl)
+            gens[label] = self._class_chunks(fl)
+        active = dict(gens)
+        while active:
+            for label in list(active.keys()):
+                try:
+                    yield label, next(active[label])
+                except StopIteration:
+                    del active[label]
 
-    def __init__(self, X, aug=None):
-        self.X, self.aug = X, aug or JetAugment()
+    def _emit(self, x, label):
+        xt = torch.from_numpy(x)
+        if self.mode == "plain":
+            return xt, int(label)
+        if self.mode == "twoview":
+            return self.aug(xt), self.aug(xt)
+        return self.aug(xt), self.aug(xt), int(label)     # twoview_labeled
 
-    def __len__(self):
-        return len(self.X)
+    def __iter__(self):
+        worker = torch.utils.data.get_worker_info()
+        wid = worker.id if worker else 0
+        nworkers = worker.num_workers if worker else 1
+        # Shared file ordering across workers (so chunk-index sharding is disjoint);
+        # per-worker buffer shuffling.
+        file_rng = np.random.default_rng(self.seed + 1000 * self._epoch)
+        buf_rng = np.random.default_rng(self.seed + 1000 * self._epoch + 7 * wid)
+        self._epoch += 1
 
-    def __getitem__(self, i):
-        return self.aug(self.X[i]), self.aug(self.X[i])
-
-
-class TwoViewLabeledJets(torch.utils.data.Dataset):
-    """Two augmented views of each jet plus its label (for SupCon)."""
-
-    def __init__(self, X, y, aug=None):
-        self.X, self.y, self.aug = X, y, aug or JetAugment()
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, i):
-        return self.aug(self.X[i]), self.aug(self.X[i]), int(self.y[i])
+        buffer, counter = [], 0
+        for label, X in self._round_robin(file_rng):
+            if counter % nworkers != wid:                 # chunk-level worker shard
+                counter += 1
+                continue
+            counter += 1
+            for i in range(len(X)):
+                buffer.append((X[i], label))
+            if len(buffer) >= self.shuffle_buffer:
+                if self.shuffle:
+                    buf_rng.shuffle(buffer)
+                half = len(buffer) // 2
+                out, buffer = buffer[:half], buffer[half:]
+                for x, lab in out:
+                    yield self._emit(x, lab)
+        if self.shuffle:
+            buf_rng.shuffle(buffer)
+        for x, lab in buffer:
+            yield self._emit(x, lab)

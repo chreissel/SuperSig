@@ -139,20 +139,22 @@ class TwoViewMNISTDataModule(GenericDataModule):
 
 
 # --------------------------------------------------------------------------- #
-# JetClass DataModules                                                         #
+# JetClass DataModules (streaming)                                             #
 #                                                                             #
 # These mirror the MNIST modules above and yield the *same* batch formats, so  #
 # the (dataset-agnostic) Lightning modules work unchanged:                     #
 #   plain      -> (features, label)                                            #
 #   two-view   -> (view1, view2) or (view1, view2, label)                      #
-# JetClass ROOT files are read from JETCLASS_DIR (or `data_dir`); a missing     #
-# path raises a clear error.                                                    #
+# ROOT files (from JETCLASS_DIR / `data_dir`) are read lazily in chunks via a   #
+# streaming IterableDataset, so peak memory is bounded regardless of the        #
+# (~100M-jet) split size.  A missing path raises a clear error.                #
 # --------------------------------------------------------------------------- #
 class _JetClassBase(GenericDataModule):
-    """Shared JetClass loading from the real ROOT files."""
+    """Shared JetClass streaming loader (bounded-memory, from the real ROOT files)."""
 
     def __init__(self, classes=None, n_particles=jc.N_PARTICLES, quick=False,
-                 data_dir=None, **kwargs):
+                 data_dir=None, max_files_per_class=None, chunk_size=10000,
+                 shuffle_buffer=20000, **kwargs):
         super().__init__(**kwargs)
         names = classes or jc.DEFAULT_CLASSES        # five classes by default
         self.class_indices = [jc.JETCLASS_CLASSES.index(c) for c in names]
@@ -160,40 +162,50 @@ class _JetClassBase(GenericDataModule):
         self.n_particles = n_particles
         self.quick = quick
         self.data_dir = data_dir or JETCLASS_DIR
+        # `quick` reads a single file per class; otherwise stream everything
+        # available (or a user-set cap).  Streaming keeps memory bounded either way.
+        self.max_files_per_class = 1 if quick else max_files_per_class
+        self.chunk_size = chunk_size
+        self.shuffle_buffer = shuffle_buffer
 
-    def _load(self, split):
-        max_events = (2000 if self.quick else None)
-        out = jc.load_root(self.data_dir, split, self.class_indices,
-                           n_particles=self.n_particles, max_events=max_events)
-        if out is None:
+    def _files(self, split):
+        fd = jc.class_file_dict(self.data_dir, split, self.class_indices,
+                                max_files_per_class=self.max_files_per_class)
+        if fd is None:
             raise FileNotFoundError(
                 f"No JetClass ROOT files for split '{split}' under {self.data_dir!r}. "
                 f"Set data_dir (or the JETCLASS_DIR env var) to the JetClass base "
                 f"directory containing train_100M/ val_5M/ test_20M subfolders of "
                 f"*.root files.")
-        print(f"  jetclass[{split}] ROOT: {len(out[1])} jets")
-        return out
+        return fd
+
+    def _stream(self, files, mode, shuffle):
+        return jc.JetStream(files, n_particles=self.n_particles, mode=mode,
+                            shuffle=shuffle, chunk_size=self.chunk_size,
+                            shuffle_buffer=self.shuffle_buffer)
+
+    def _loader(self, stream, drop_last=False):
+        # IterableDataset -> shuffle is handled inside the stream (DataLoader
+        # shuffle must stay False).
+        return DataLoader(stream, drop_last=drop_last, **self.loader_kwargs)
 
 
 class JetClassDataModule(_JetClassBase):
     """Plain JetClass ``(features, label)`` for all requested classes."""
 
     def setup(self, stage=None):
-        self.train_X, self.train_y = self._load("train")
-        self.val_X, self.val_y = self._load("val")
-        self.test_X, self.test_y = self._load("test")
+        self.ftrain = self._files("train")
+        self.fval = self._files("val")
+        self.ftest = self._files("test")
 
     def train_dataloader(self):
-        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
-                          shuffle=True, **self.loader_kwargs)
+        return self._loader(self._stream(self.ftrain, "plain", shuffle=True))
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._stream(self.fval, "plain", shuffle=False))
 
     def test_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._stream(self.ftest, "plain", shuffle=False))
 
 
 class JetClassClasswiseDataModule(_JetClassBase):
@@ -204,28 +216,22 @@ class JetClassClasswiseDataModule(_JetClassBase):
         self.holdout = holdout
 
     def setup(self, stage=None):
-        X, y = self._load("train")
+        self.ftrain = self._files("train")
         if self.holdout is not None:
-            keep = y != self.holdout
-            X, y = X[keep], y[keep]
-            print(f"  jetclass train without class {self.holdout}: {len(y)} jets")
-        self.train_X, self.train_y = X, y
-        self.val_X, self.val_y = self._load("val")
-        self.test_X, self.test_y = self._load("test")
+            self.ftrain.pop(self.holdout, None)      # drop the held-out class
+        self.fval = self._files("val")
+        self.ftest = self._files("test")
 
     def train_dataloader(self):
         # drop_last: see ClasswiseMNISTDataModule -- avoids an all-below-threshold
         # final batch collapsing the class-conditional SIGReg term to a no-grad zero.
-        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
-                          shuffle=True, drop_last=True, **self.loader_kwargs)
+        return self._loader(self._stream(self.ftrain, "plain", shuffle=True), drop_last=True)
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._stream(self.fval, "plain", shuffle=False))
 
     def test_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._stream(self.ftest, "plain", shuffle=False))
 
 
 class JetClassTwoViewDataModule(_JetClassBase):
@@ -238,23 +244,22 @@ class JetClassTwoViewDataModule(_JetClassBase):
         super().__init__(**kwargs)
         self.labeled = labeled
         self.holdout = holdout
+        self.mode = "twoview_labeled" if labeled else "twoview"
 
-    def _wrap(self, X, y):
+    def _files_no_holdout(self, split):
+        fd = self._files(split)
         if self.holdout is not None:
-            keep = y != self.holdout
-            X, y = X[keep], y[keep]
-        return (jc.TwoViewLabeledJets(X, y) if self.labeled else jc.TwoViewJets(X))
+            fd.pop(self.holdout, None)
+        return fd
 
     def setup(self, stage=None):
-        Xtr, ytr = self._load("train")
-        Xval, yval = self._load("val")
-        self.train_ds = self._wrap(Xtr, ytr)
-        self.val_ds = self._wrap(Xval, yval)
+        self.ftrain = self._files_no_holdout("train")
+        self.fval = self._files_no_holdout("val")
 
     def train_dataloader(self):
-        return DataLoader(self.train_ds, shuffle=True, drop_last=self.labeled,
-                          **self.loader_kwargs)
+        return self._loader(self._stream(self.ftrain, self.mode, shuffle=True),
+                            drop_last=self.labeled)
 
     def val_dataloader(self):
-        return DataLoader(self.val_ds, shuffle=False, drop_last=self.labeled,
-                          **self.loader_kwargs)
+        return self._loader(self._stream(self.fval, self.mode, shuffle=False),
+                            drop_last=self.labeled)

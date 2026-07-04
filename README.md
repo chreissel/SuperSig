@@ -57,10 +57,13 @@ per-feature **standardization**, a **projection head** for the contrastive objec
 (loss on the projection, the encoder embedding used for probing), and a distinct
 **train / val / test** split.
 
-JetClass data is read from the real ROOT files (via `uproot`). Each
-`configs/jetclass_*.yaml` has a `data.init_args.data_dir` field pointing at the
-JetClass base directory, which must contain the `train_100M/`, `val_5M/`,
-`test_20M/` subfolders of `*.root` files (the reference cluster layout):
+JetClass data is read from the real ROOT files (via `uproot`), **streamed** lazily
+in chunks with a bounded shuffle buffer (`JetStream`, an `IterableDataset`) so peak
+memory stays flat regardless of split size — the memory-safe analogue of the
+reference's weaver `SimpleIterDataset`. Each `configs/jetclass_*.yaml` has a
+`data.init_args.data_dir` field pointing at the JetClass base directory, which must
+contain the `train_100M/`, `val_5M/`, `test_20M/` subfolders of `*.root` files (the
+reference cluster layout):
 
 ```yaml
 data:
