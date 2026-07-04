@@ -166,6 +166,12 @@ class _JetClassBase(GenericDataModule):
         # 1%-of-events streaming fetch.
         self.fetch_step = 1.0 if quick else fetch_step
 
+    def setup(self, stage=None):
+        # Nothing to precompute -- file lists are globbed lazily per dataloader and
+        # the weaver dataset streams.  Defined so an explicit `dm.setup()` (as the
+        # experiment scripts call) doesn't hit LightningDataModule.setup(stage).
+        pass
+
     def _holdout_name(self, holdout):
         return None if holdout is None else jc.DEFAULT_CLASSES[holdout]
 
