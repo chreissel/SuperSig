@@ -3,6 +3,7 @@ __pycache__/
 mnist_data/
 runs/
 wandb/
+*.auto.yaml
 *.log
 slurm_logs/*
 !slurm_logs/.gitkeep

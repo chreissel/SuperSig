@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 import lightning as pl
 
-from models.config import DATA_DIR, JETCLASS_DIR, HOLDOUT  # noqa: F401  (HOLDOUT is a handy default)
+from models.config import DATA_DIR, JETCLASS_DIR, JETCLASS_DATA_CONFIG, HOLDOUT  # noqa: F401
 from . import data_utils as dutils
 from . import jetclass_data as jc
 
@@ -139,61 +139,69 @@ class TwoViewMNISTDataModule(GenericDataModule):
 
 
 # --------------------------------------------------------------------------- #
-# JetClass DataModules                                                         #
+# JetClass DataModules (vendored weaver SimpleIterDataset + adapter)           #
 #                                                                             #
-# These mirror the MNIST modules above and yield the *same* batch formats, so  #
-# the (dataset-agnostic) Lightning modules work unchanged:                     #
+# These wrap the reference's streaming weaver loader (bounded memory, exact     #
+# feature/standardization/padding recipe from the YAML data config) and adapt   #
+# its per-jet output into the *same* batch formats as the MNIST modules, so the #
+# (dataset-agnostic) SIGReg / SupCon Lightning modules work unchanged:          #
 #   plain      -> (features, label)                                            #
 #   two-view   -> (view1, view2) or (view1, view2, label)                      #
-# JetClass ROOT files are read from JETCLASS_DIR (or `data_dir`); a missing     #
-# path raises a clear error.                                                    #
+# ROOT files come from JETCLASS_DIR / `data_dir`; a missing path raises.        #
 # --------------------------------------------------------------------------- #
 class _JetClassBase(GenericDataModule):
-    """Shared JetClass loading from the real ROOT files."""
+    """Shared JetClass loading via the vendored weaver ``SimpleIterDataset``."""
 
-    def __init__(self, classes=None, n_particles=jc.N_PARTICLES, quick=False,
-                 data_dir=None, **kwargs):
+    def __init__(self, classes=None, quick=False, data_dir=None, data_config=None,
+                 max_files_per_class=None, fetch_step=0.01, **kwargs):
         super().__init__(**kwargs)
-        names = classes or jc.DEFAULT_CLASSES        # five classes by default
-        self.class_indices = [jc.JETCLASS_CLASSES.index(c) for c in names]
-        self.n_classes = len(names)
-        self.n_particles = n_particles
+        self.class_names = list(classes) if classes else list(jc.DEFAULT_CLASSES)
+        # Label space is fixed by the data config's `labels.value` list (5 classes).
+        self.n_classes = len(jc.DEFAULT_CLASSES)
         self.quick = quick
         self.data_dir = data_dir or JETCLASS_DIR
+        self.data_config = data_config or JETCLASS_DATA_CONFIG
+        self.max_files_per_class = 1 if quick else max_files_per_class
+        # quick: load everything at once (tiny files); else the reference's
+        # 1%-of-events streaming fetch.
+        self.fetch_step = 1.0 if quick else fetch_step
 
-    def _load(self, split):
-        max_events = (2000 if self.quick else None)
-        out = jc.load_root(self.data_dir, split, self.class_indices,
-                           n_particles=self.n_particles, max_events=max_events)
-        if out is None:
+    def _holdout_name(self, holdout):
+        return None if holdout is None else jc.DEFAULT_CLASSES[holdout]
+
+    def _file_dict(self, split, drop_class=None):
+        fd = jc.build_file_dict(self.data_dir, split, self.class_names,
+                                max_files_per_class=self.max_files_per_class)
+        if fd is None:
             raise FileNotFoundError(
                 f"No JetClass ROOT files for split '{split}' under {self.data_dir!r}. "
                 f"Set data_dir (or the JETCLASS_DIR env var) to the JetClass base "
                 f"directory containing train_100M/ val_5M/ test_20M subfolders of "
                 f"*.root files.")
-        print(f"  jetclass[{split}] ROOT: {len(out[1])} jets")
-        return out
+        if drop_class is not None:
+            fd.pop(drop_class, None)
+        return fd
+
+    def _loader(self, file_dict, mode, for_training, split, drop_last=False):
+        ds = jc.make_iter_dataset(file_dict, self.data_config, for_training=for_training,
+                                  fetch_step=self.fetch_step, name=split)
+        kwargs = dict(self.loader_kwargs)
+        if kwargs.get("num_workers", 0) > 0:                # matches the reference
+            kwargs["persistent_workers"] = True
+        return DataLoader(jc.JetClassAdapter(ds, mode=mode), drop_last=drop_last, **kwargs)
 
 
 class JetClassDataModule(_JetClassBase):
     """Plain JetClass ``(features, label)`` for all requested classes."""
 
-    def setup(self, stage=None):
-        self.train_X, self.train_y = self._load("train")
-        self.val_X, self.val_y = self._load("val")
-        self.test_X, self.test_y = self._load("test")
-
     def train_dataloader(self):
-        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
-                          shuffle=True, **self.loader_kwargs)
+        return self._loader(self._file_dict("train"), "plain", for_training=True, split="train")
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._file_dict("val"), "plain", for_training=True, split="val")
 
     def test_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._file_dict("test"), "plain", for_training=False, split="test")
 
 
 class JetClassClasswiseDataModule(_JetClassBase):
@@ -203,29 +211,17 @@ class JetClassClasswiseDataModule(_JetClassBase):
         super().__init__(**kwargs)
         self.holdout = holdout
 
-    def setup(self, stage=None):
-        X, y = self._load("train")
-        if self.holdout is not None:
-            keep = y != self.holdout
-            X, y = X[keep], y[keep]
-            print(f"  jetclass train without class {self.holdout}: {len(y)} jets")
-        self.train_X, self.train_y = X, y
-        self.val_X, self.val_y = self._load("val")
-        self.test_X, self.test_y = self._load("test")
-
     def train_dataloader(self):
-        # drop_last: see ClasswiseMNISTDataModule -- avoids an all-below-threshold
-        # final batch collapsing the class-conditional SIGReg term to a no-grad zero.
-        return DataLoader(jc.JetDataset(self.train_X, self.train_y),
-                          shuffle=True, drop_last=True, **self.loader_kwargs)
+        # drop_last: a tiny final batch can have every class below MIN_PER_CLASS,
+        # collapsing the class-conditional SIGReg term to a no-grad zero.
+        fd = self._file_dict("train", drop_class=self._holdout_name(self.holdout))
+        return self._loader(fd, "plain", for_training=True, split="train", drop_last=True)
 
     def val_dataloader(self):
-        return DataLoader(jc.JetDataset(self.val_X, self.val_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._file_dict("val"), "plain", for_training=True, split="val")
 
     def test_dataloader(self):
-        return DataLoader(jc.JetDataset(self.test_X, self.test_y),
-                          shuffle=False, **self.loader_kwargs)
+        return self._loader(self._file_dict("test"), "plain", for_training=False, split="test")
 
 
 class JetClassTwoViewDataModule(_JetClassBase):
@@ -238,23 +234,12 @@ class JetClassTwoViewDataModule(_JetClassBase):
         super().__init__(**kwargs)
         self.labeled = labeled
         self.holdout = holdout
-
-    def _wrap(self, X, y):
-        if self.holdout is not None:
-            keep = y != self.holdout
-            X, y = X[keep], y[keep]
-        return (jc.TwoViewLabeledJets(X, y) if self.labeled else jc.TwoViewJets(X))
-
-    def setup(self, stage=None):
-        Xtr, ytr = self._load("train")
-        Xval, yval = self._load("val")
-        self.train_ds = self._wrap(Xtr, ytr)
-        self.val_ds = self._wrap(Xval, yval)
+        self.mode = "twoview_labeled" if labeled else "twoview"
 
     def train_dataloader(self):
-        return DataLoader(self.train_ds, shuffle=True, drop_last=self.labeled,
-                          **self.loader_kwargs)
+        fd = self._file_dict("train", drop_class=self._holdout_name(self.holdout))
+        return self._loader(fd, self.mode, for_training=True, split="train", drop_last=self.labeled)
 
     def val_dataloader(self):
-        return DataLoader(self.val_ds, shuffle=False, drop_last=self.labeled,
-                          **self.loader_kwargs)
+        fd = self._file_dict("val", drop_class=self._holdout_name(self.holdout))
+        return self._loader(fd, self.mode, for_training=True, split="val", drop_last=self.labeled)

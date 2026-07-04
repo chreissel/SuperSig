@@ -13,6 +13,10 @@ DATA_DIR = os.path.join(REPO_DIR, "mnist_data")
 # subdirectories (the reference cluster layout).
 JETCLASS_DIR = os.environ.get(
     "JETCLASS_DIR", "/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/")
+# weaver data-config YAML describing the JetClass feature/label/observer layout
+# (vendored verbatim from phlab-neurips25).
+JETCLASS_DATA_CONFIG = os.path.join(
+    REPO_DIR, "configs", "jetclass_data_configs", "JetClass_full.yaml")
 PLOTS_DIR = os.path.join(REPO_DIR, "plots")
 os.makedirs(PLOTS_DIR, exist_ok=True)
 

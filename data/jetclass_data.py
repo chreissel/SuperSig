@@ -1,35 +1,25 @@
 """
-JetClass dataset primitives.
+JetClass data: the **vendored weaver** dataloading stack + a thin adapter.
 
-JetClass (Qu, Li & Qian, 2022, https://arxiv.org/abs/2202.03772) is a jet-tagging
-benchmark with ten jet classes.  Mirroring the reference repo (phlab-neurips25),
-the embedding is trained on a **five-class** subset by default -- QCD, Tbqq
-(ttbar), Wqq, Zqq, Hbb (see ``DEFAULT_CLASSES``).  All ten can be selected by
-passing an explicit ``classes`` list.
+The reference repo (phlab-neurips25) loads JetClass with weaver's streaming
+``SimpleIterDataset`` driven by a YAML data config.  That whole stack is vendored
+verbatim under ``data/jetclass/`` (``dataset.py``, ``fileio.py``, ``preprocess.py``,
+``config.py``, ``tools.py``) and the config under
+``configs/jetclass_data_configs/JetClass_full.yaml`` -- so feature building,
+manual standardization, wrap-padding, selection, and (optional) reweighting are
+exactly the reference's.
 
-Each jet is a fixed-size particle cloud with, per particle, the reference's full
-**17 input features** followed by the four-momentum **vectors** used by
-ParticleTransformer for its pairwise interaction features::
+``SimpleIterDataset`` yields per-jet ``(X, y, Z)`` where ``X`` is a dict of input
+groups (``pf_points``/``pf_features``/``pf_vectors``/``pf_mask``, each ``[C, P]``),
+``y['_label_']`` is the class index, and ``Z`` are observer variables (test only).
+``JetClassAdapter`` converts that into the tensors our (SIGReg / SupCon) Lightning
+modules expect, packing::
 
-    features (17): log_pt, log_e, log_ptrel, log_erel, deltaR,
-                   charge, isChargedHadron, isNeutralHadron, isPhoton,
-                   isElectron, isMuon, d0, d0err, dz, dzerr, deta, dphi
-    vectors  (4):  px, py, pz, energy
+    x = [ pf_features (17) | pf_vectors (4) | pf_mask (1) ]  ->  [P, 22]
 
-so every jet tensor has ``N_CHANNELS = 21`` channels.  The 17 features are
-standardized with the same manual center/scale/clip values as the reference data
-config (``JetClass_full.yaml``); the four vectors are kept raw (ParT derives its
-own pairwise quantities from them).  Padded slots are all-zero, the sentinel the
-encoders use to build the particle mask.
-
-The official JetClass ROOT files are read with ``uproot`` (lazy import) from
-``JETCLASS_DIR`` (or a directory passed to the DataModule); PID / impact-parameter
-branches are used when present.
-
-The two-view augmentation (SIGReg-SSL / SupCon) is an eta-phi rotation of the
-relative coordinates plus mild pt smearing; the same azimuthal rotation is applied
-to (px, py) so ParT's rotation-invariant pairwise features stay consistent.  As in
-the reference, the augmentation lives here in the loader, not in the module.
+with the mask kept as the last channel (wrap-padding means padded slots are *not*
+zero, so ParT reads the explicit mask).  Two augmented views (for SIGReg-SSL /
+SupCon) are produced here via ``JetAugment``.
 """
 import glob
 import os
@@ -37,215 +27,104 @@ import os
 import numpy as np
 import torch
 
-# Ten JetClass categories, in the canonical order used by the official label
-# branches (``label_QCD`` ... ``label_Tbl``).
-JETCLASS_CLASSES = ["QCD", "Hbb", "Hcc", "Hgg", "H4q", "Hqql", "Zqq", "Wqq", "Tbqq", "Tbl"]
-LABEL_BRANCHES = [f"label_{c}" for c in JETCLASS_CLASSES]
+from .jetclass.dataset import SimpleIterDataset
 
-# The five classes used for embedding training in the reference repo
-# (phlab-neurips25, configs/jetclass_data_configs/JetClass_full.yaml:
-#  value: [label_QCD, label_Tbqq, label_Wqq, label_Zqq, label_Hbb]).
+# Ten JetClass categories (canonical label-branch order).
+JETCLASS_CLASSES = ["QCD", "Hbb", "Hcc", "Hgg", "H4q", "Hqql", "Zqq", "Wqq", "Tbqq", "Tbl"]
+
+# Five classes used for embedding training (matches the vendored data config's
+# `labels.value` order -> contiguous labels 0..4).
 DEFAULT_CLASSES = ["QCD", "Tbqq", "Wqq", "Zqq", "Hbb"]
 
-P4_BRANCHES = ["part_px", "part_py", "part_pz", "part_energy"]
-# Optional per-particle branches (PID flags + impact parameters); used when present.
-EXTRA_BRANCHES = ["part_charge", "part_isChargedHadron", "part_isNeutralHadron",
-                  "part_isPhoton", "part_isElectron", "part_isMuon",
-                  "part_d0val", "part_d0err", "part_dzval", "part_dzerr"]
+# JetClass files are single-class, named by these prefixes.
+CLASS_FILE_HEADERS = {
+    "QCD": "ZJetsToNuNu", "Hbb": "HToBB", "Hcc": "HToCC", "Hgg": "HToGG",
+    "H4q": "HToWW4Q", "Hqql": "HToWW2Q1L", "Zqq": "ZToQQ", "Wqq": "WToQQ",
+    "Tbqq": "TTBar", "Tbl": "TTBarLep",
+}
 
-# Feature layout (17), matching JetClass_full.yaml `pf_features`, then 4 vectors.
-FEATURE_NAMES = ["log_pt", "log_e", "log_ptrel", "log_erel", "deltaR",
-                 "charge", "isChargedHadron", "isNeutralHadron", "isPhoton",
-                 "isElectron", "isMuon", "d0", "d0err", "dz", "dzerr", "deta", "dphi"]
-N_FEATURES = len(FEATURE_NAMES)          # 17
-N_VECTORS = len(P4_BRANCHES)             # 4  (px, py, pz, energy)
-N_CHANNELS = N_FEATURES + N_VECTORS      # 21
-
-I_DR, I_DETA, I_DPHI = 4, 15, 16         # within the feature block
-I_PX, I_PY = N_FEATURES + 0, N_FEATURES + 1   # within the vector block
-
-N_PARTICLES = 64          # particles per jet after padding / truncation
-
-# Per-feature standardization (center, scale, clip_min, clip_max) from the
-# reference data config; ``None`` means no transform (raw value kept).
-STD = [
-    (1.7, 0.7, -5, 5),    # log_pt
-    (2.0, 0.7, -5, 5),    # log_e
-    (-4.7, 0.7, -5, 5),   # log_ptrel
-    (-4.7, 0.7, -5, 5),   # log_erel
-    (0.2, 4.0, -5, 5),    # deltaR
-    None,                 # charge
-    None,                 # isChargedHadron
-    None,                 # isNeutralHadron
-    None,                 # isPhoton
-    None,                 # isElectron
-    None,                 # isMuon
-    None,                 # d0 (= tanh(d0val))
-    (0, 1, 0, 1),         # d0err
-    None,                 # dz (= tanh(dzval))
-    (0, 1, 0, 1),         # dzerr
-    None,                 # deta
-    None,                 # dphi
-]
-
-
-# --------------------------------------------------------------------------- #
-# Feature computation                                                          #
-# --------------------------------------------------------------------------- #
-def compute_features(px, py, pz, energy, charge=None, isChargedHadron=None,
-                     isNeutralHadron=None, isPhoton=None, isElectron=None,
-                     isMuon=None, d0val=None, d0err=None, dzval=None, dzerr=None):
-    """
-    Build the ``[N, P, 21]`` jet tensor (17 standardized features + 4 raw vectors)
-    from padded per-particle arrays (each ``[N, P]``, zero-padded).  Optional
-    PID / impact-parameter arrays default to zero when absent.
-    """
-    px, py, pz, energy = (np.asarray(a, dtype=np.float64) for a in (px, py, pz, energy))
-    n, p = px.shape
-    z = np.zeros((n, p))
-
-    def opt(a, fn=None):
-        if a is None:
-            return z.copy()
-        a = np.asarray(a, dtype=np.float64)
-        return fn(a) if fn else a
-
-    pt = np.hypot(px, py)
-    mask = pt > 0                                            # real particles
-    eta = np.arcsinh(np.divide(pz, pt, out=np.zeros_like(pz), where=mask))
-    phi = np.arctan2(py, px)
-
-    jpx, jpy, jpz, je = (a.sum(axis=1) for a in (px, py, pz, energy))
-    jpt = np.hypot(jpx, jpy)[:, None]
-    jeta = np.arcsinh(np.divide(jpz, jpt[:, 0], out=np.zeros_like(jpz), where=jpt[:, 0] > 0))[:, None]
-    jphi = np.arctan2(jpy, jpx)[:, None]
-    je = je[:, None]
-
-    deta = eta - jeta
-    dphi = np.arctan2(np.sin(phi - jphi), np.cos(phi - jphi))
-    dR = np.hypot(deta, dphi)
-
-    eps = 1e-8
-    log_pt = np.log(pt + eps)
-    log_e = np.log(energy + eps)
-    log_ptrel = np.log(pt / (jpt + eps) + eps)
-    log_erel = np.log(energy / (je + eps) + eps)
-
-    feats = np.stack([
-        log_pt, log_e, log_ptrel, log_erel, dR,
-        opt(charge), opt(isChargedHadron), opt(isNeutralHadron), opt(isPhoton),
-        opt(isElectron), opt(isMuon),
-        opt(d0val, np.tanh), opt(d0err), opt(dzval, np.tanh), opt(dzerr),
-        deta, dphi,
-    ], axis=-1)                                              # [N, P, 17]
-
-    for i, params in enumerate(STD):
-        if params is not None:
-            c, s, lo, hi = params
-            feats[..., i] = np.clip((feats[..., i] - c) * s, lo, hi)
-
-    vectors = np.stack([px, py, pz, energy], axis=-1)        # [N, P, 4] (raw)
-    x = np.concatenate([feats, vectors], axis=-1)            # [N, P, 21]
-    x = x * mask[..., None]                                  # zero the padded slots
-    return x.astype(np.float32)
-
-
-# --------------------------------------------------------------------------- #
-# JetClass ROOT files (uproot, lazily imported)                                #
-# --------------------------------------------------------------------------- #
-# Subdirectory holding each split on the reference cluster
-# (/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/).
+# Split -> subdirectory on the reference cluster.
 SPLIT_DIRS = {"train": "train_100M", "val": "val_5M", "test": "test_20M"}
 
+N_PARTICLES = 64            # `length` of every input group in the data config
 
-def _find_files(data_dir, split):
-    if data_dir is None:
-        return []
-    # Try the cluster subdir (train_100M/...), then a plain split/ dir, then the
-    # directory itself.
-    for sub in (SPLIT_DIRS.get(split, split), split, ""):
-        cand = os.path.join(data_dir, sub) if sub else data_dir
-        files = sorted(glob.glob(os.path.join(cand, "**", "*.root"), recursive=True))
-        if files:
-            return files
-    return []
-
-
-def load_root(data_dir, split, class_indices, n_particles=N_PARTICLES,
-              max_events=None, max_files=None):
-    """
-    Load JetClass jets for ``split`` (``train`` / ``val`` / ``test``).
-
-    Returns ``(X, y)`` tensors, or ``None`` if no ROOT files are found under
-    ``data_dir`` (the DataModule turns that into a clear error).
-    """
-    files = _find_files(data_dir, split)
-    if not files:
-        return None
-    if max_files:
-        files = files[:max_files]
-
-    import uproot          # lazy: only needed for the real dataset
-    import awkward as ak
-
-    keep = set(int(c) for c in class_indices)
-    label_cols = [LABEL_BRANCHES[c] for c in class_indices]
-    remap = {c: i for i, c in enumerate(class_indices)}   # original -> contiguous
-
-    Xs, ys, n_seen = [], [], 0
-    for path in files:
-        f = uproot.open(path)
-        tree = f["tree"] if "tree" in f else f[f.keys(recursive=False)[0]]
-        avail = set(tree.keys())
-        want = P4_BRANCHES + [b for b in EXTRA_BRANCHES if b in avail]
-        arr = tree.arrays(want + label_cols, library="ak")
-
-        onehot = np.stack([ak.to_numpy(arr[b]).astype(np.int64) for b in label_cols], axis=1)
-        cls_local = onehot.argmax(axis=1)
-        has_label = onehot.sum(axis=1) > 0
-        cls_orig = np.array([class_indices[i] for i in cls_local])
-        sel = has_label & np.array([int(c) in keep for c in cls_orig])
-        if not sel.any():
-            continue
-
-        def pad(branch):
-            a = arr[branch][sel]
-            a = ak.pad_none(a, n_particles, clip=True)
-            return ak.to_numpy(ak.fill_none(a, 0.0)).astype(np.float64)
-
-        # map branch names -> compute_features kwargs
-        kwargs = {}
-        alias = {"part_charge": "charge", "part_isChargedHadron": "isChargedHadron",
-                 "part_isNeutralHadron": "isNeutralHadron", "part_isPhoton": "isPhoton",
-                 "part_isElectron": "isElectron", "part_isMuon": "isMuon",
-                 "part_d0val": "d0val", "part_d0err": "d0err",
-                 "part_dzval": "dzval", "part_dzerr": "dzerr"}
-        for b in EXTRA_BRANCHES:
-            if b in avail:
-                kwargs[alias[b]] = pad(b)
-
-        X = compute_features(pad("part_px"), pad("part_py"), pad("part_pz"),
-                             pad("part_energy"), **kwargs)
-        y = np.array([remap[int(c)] for c in cls_orig[sel]], dtype=np.int64)
-        Xs.append(X); ys.append(y); n_seen += len(y)
-        if max_events and n_seen >= max_events:
-            break
-
-    if not Xs:
-        return None
-    X = np.concatenate(Xs)[:max_events] if max_events else np.concatenate(Xs)
-    y = np.concatenate(ys)[:max_events] if max_events else np.concatenate(ys)
-    return torch.from_numpy(X), torch.from_numpy(y)
+# Packed-channel layout produced by the adapter (features + vectors + mask).
+N_FEATURES = 17            # pf_features
+N_VECTORS = 4              # pf_vectors (px, py, pz, energy)
+N_CHANNELS = N_FEATURES + N_VECTORS + 1   # 22 (+ mask)
+I_DR, I_DETA, I_DPHI = 4, 15, 16          # within pf_features (data-config order)
+I_PX, I_PY = N_FEATURES, N_FEATURES + 1   # within pf_vectors
+I_MASK = N_FEATURES + N_VECTORS           # 21
 
 
 # --------------------------------------------------------------------------- #
-# Augmentation + two-view datasets                                             #
+# File discovery                                                              #
+# --------------------------------------------------------------------------- #
+def _split_dir(data_dir, split):
+    """Resolve the directory for a split (train_100M / plain split/ / data_dir)."""
+    if data_dir is None:
+        return None
+    for sub in (SPLIT_DIRS.get(split, split), split, ""):
+        cand = os.path.join(data_dir, sub) if sub else data_dir
+        if os.path.isdir(cand) and glob.glob(os.path.join(cand, "**", "*.root"), recursive=True):
+            return cand
+    return None
+
+
+def build_file_dict(data_dir, split, class_names, max_files_per_class=None):
+    """
+    ``{class_name: [root files]}`` for ``split`` (the ``file_dict`` weaver wants).
+    Returns ``None`` if no files are found (the DataModule turns that into an error).
+    """
+    split_dir = _split_dir(data_dir, split)
+    if split_dir is None:
+        return None
+    out = {}
+    for c in class_names:
+        header = CLASS_FILE_HEADERS[c]
+        files = sorted(glob.glob(os.path.join(split_dir, "**", f"{header}_*.root"),
+                                 recursive=True))
+        if max_files_per_class:
+            files = files[:max_files_per_class]
+        if files:
+            out[c] = files
+    return out or None
+
+
+def make_iter_dataset(file_dict, data_config, for_training, fetch_step=0.01,
+                      file_fraction=1, load_fraction=1, name="", async_load=True):
+    """
+    Construct a weaver ``SimpleIterDataset`` (streaming, bounded memory) with the
+    reference's settings (``fetch_by_files=False``, ``fetch_step=0.01``,
+    ``file_fraction=1``, ``load_range_and_fraction=((0,1),1)``, ``remake_weights=True``,
+    ``async_load=True``).  With the vendored config having no ``weights`` section,
+    ``remake_weights`` is a no-op (no reweighting is applied).
+    """
+    return SimpleIterDataset(
+        file_dict, data_config,
+        for_training=for_training,
+        load_range_and_fraction=((0, 1), load_fraction),
+        fetch_by_files=False,
+        fetch_step=fetch_step,
+        file_fraction=file_fraction,
+        remake_weights=True,
+        async_load=async_load,
+        infinity_mode=False,
+        in_memory=False,
+        name=name,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Augmentation (two-view) + adapter to our tensor format                       #
 # --------------------------------------------------------------------------- #
 class JetAugment:
     """
     Random eta-phi rotation of the relative coordinates + mild pt / log smearing.
     The same azimuthal rotation is applied to (px, py) so ParT's rotation-invariant
-    pairwise features stay consistent with the rotated node features.
+    pairwise features stay consistent.  Operates on the packed ``[P, 22]`` tensor
+    and leaves the mask channel untouched (padding is handled by the mask, not by
+    zeroing -- the data config wrap-pads).
     """
 
     def __init__(self, ang_sigma=0.02, logpt_sigma=0.05):
@@ -254,8 +133,6 @@ class JetAugment:
 
     def __call__(self, feats):
         feats = feats.clone()
-        mask = (feats.abs().sum(-1, keepdim=True) > 0).float()
-
         theta = torch.rand(1, device=feats.device) * 2 * np.pi
         cos, sin = torch.cos(theta), torch.sin(theta)
 
@@ -270,43 +147,33 @@ class JetAugment:
         feats[:, :4] += torch.randn_like(feats[:, :4]) * self.logpt_sigma
         feats[:, I_DETA] += torch.randn_like(feats[:, I_DETA]) * self.ang_sigma
         feats[:, I_DPHI] += torch.randn_like(feats[:, I_DPHI]) * self.ang_sigma
-        return feats * mask                                 # keep padded slots zero
+        return feats                                        # mask channel left as-is
 
 
-class JetDataset(torch.utils.data.Dataset):
-    """Plain ``(features, label)`` jets."""
+class JetClassAdapter(torch.utils.data.IterableDataset):
+    """
+    Wrap a weaver ``SimpleIterDataset`` and yield our per-sample formats:
 
-    def __init__(self, X, y):
-        self.X, self.y = X, y
+        mode="plain"           -> (features[P,22], label)
+        mode="twoview"         -> (view1, view2)
+        mode="twoview_labeled" -> (view1, view2, label)
+    """
 
-    def __len__(self):
-        return len(self.y)
+    def __init__(self, iter_ds, mode="plain", aug=None):
+        super().__init__()
+        self.iter_ds = iter_ds
+        self.mode = mode
+        self.aug = aug or JetAugment()
 
-    def __getitem__(self, i):
-        return self.X[i], int(self.y[i])
-
-
-class TwoViewJets(torch.utils.data.Dataset):
-    """Two augmented views of each jet (no label)."""
-
-    def __init__(self, X, aug=None):
-        self.X, self.aug = X, aug or JetAugment()
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, i):
-        return self.aug(self.X[i]), self.aug(self.X[i])
-
-
-class TwoViewLabeledJets(torch.utils.data.Dataset):
-    """Two augmented views of each jet plus its label (for SupCon)."""
-
-    def __init__(self, X, y, aug=None):
-        self.X, self.y, self.aug = X, y, aug or JetAugment()
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, i):
-        return self.aug(self.X[i]), self.aug(self.X[i]), int(self.y[i])
+    def __iter__(self):
+        for X, y, _ in self.iter_ds:                        # weaver yields (X, y, Z)
+            packed = np.concatenate(
+                [X["pf_features"], X["pf_vectors"], X["pf_mask"]], axis=0)  # [22, P]
+            xt = torch.from_numpy(np.ascontiguousarray(packed.T)).float()  # [P, 22]
+            label = int(np.asarray(y["_label_"]).reshape(-1)[0])
+            if self.mode == "plain":
+                yield xt, label
+            elif self.mode == "twoview":
+                yield self.aug(xt), self.aug(xt)
+            else:                                           # twoview_labeled
+                yield self.aug(xt), self.aug(xt), label

@@ -51,14 +51,22 @@ stay untouched. Only the *encoder* and *DataModule* differ per dataset:
 | augmentation | affine (two views) | η–φ rotation (features + vectors) + pt smearing |
 
 The JetClass side mirrors the reference closely: the vendored **ParticleTransformer**
-(`models/parT.py`) as the encoder, the full **17 per-particle features** plus the
-`pf_vectors` (px,py,pz,E) used for ParT's pairwise features, the reference's manual
-per-feature **standardization**, a **projection head** for the contrastive objectives
-(loss on the projection, the encoder embedding used for probing), and a distinct
-**train / val / test** split.
+(`models/parT.py`) as the encoder, the vendored **weaver dataloading stack** (see
+below), a **projection head** for the contrastive objectives (loss on the projection,
+the encoder embedding used for probing), and a distinct **train / val / test** split.
 
-JetClass data is read from the real ROOT files (via `uproot`). Each
-`configs/jetclass_*.yaml` has a `data.init_args.data_dir` field pointing at the
+**Dataloading is the exact weaver setup.** The reference's streaming loader is
+vendored verbatim under `data/jetclass/` (`dataset.py` = `SimpleIterDataset`,
+`fileio.py`, `preprocess.py`, `config.py`, `tools.py`) and driven by the vendored
+YAML data config `configs/jetclass_data_configs/JetClass_full.yaml` — so feature
+building, the 17 per-particle features + `pf_vectors`, manual per-feature
+standardization, wrap-padding, selection, and (optional) reweighting are identical
+to the reference. It streams (bounded memory, scales to the full 100M-jet split). A
+thin `JetClassAdapter` converts weaver's per-jet `(X, y, obs)` into our tensors
+(`pf_features | pf_vectors | pf_mask` → `[P, 22]`) and builds the two augmented
+views for SIGReg-SSL / SupCon; the SIGReg/SupCon models are unchanged.
+
+Each `configs/jetclass_*.yaml` has a `data.init_args.data_dir` field pointing at the
 JetClass base directory, which must contain the `train_100M/`, `val_5M/`,
 `test_20M/` subfolders of `*.root` files (the reference cluster layout):
 
