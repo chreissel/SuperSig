@@ -6,7 +6,7 @@ trainer:
   accelerator: auto
   default_root_dir: runs/jetclass_supsimclr/
   max_epochs: 100
-  log_every_n_steps: 10
+  log_every_n_steps: 1
   # Cap the data seen per epoch, mirroring phlab-neurips25.
   limit_train_batches: 100
   limit_val_batches: 20
@@ -53,12 +53,13 @@ model:
     # classifier: null   # optional cross-entropy head (as in the reference)
     lr: 5.0e-4
     weight_decay: 1.0e-5
-    t_max: 10
+    t_max: 100         # reference (phlab-neurips25): CosineAnnealingLR T_max
+    eta_min: 1.0e-6    # reference: CosineAnnealingLR eta_min
 
 data:
   class_path: data.datasets.JetClassDataModule    # plain (features, label) -- single view
   init_args:
     data_dir: /n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/
     classes: [QCD, Tbqq, Wqq, Zqq, Hbb]
-    batch_size: 256
+    batch_size: 1024   # reference (phlab-neurips25) value
     num_workers: 1
