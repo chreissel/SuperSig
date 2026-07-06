@@ -36,7 +36,7 @@ model:
       class_path: models.networks.ParticleTransformerModel
       init_args:
         input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
-        emb_dim: 16            # embedding dimension
+        emb_dim: 4             # reference (phlab-neurips25): num_classes/out dim = 4
         embed_dims: [128, 512, 128]
         pair_embed_dims: [64, 64, 64]
         num_heads: 8
@@ -46,13 +46,13 @@ model:
     projector:
       class_path: models.networks.MLP
       init_args:
-        input_dim: 16
-        hidden_dims: [16]
-        output_dim: 16
+        input_dim: 4           # reference: MLP 4 -> [4] -> 4
+        hidden_dims: [4]
+        output_dim: 4
     temperature: 0.1
     # classifier: null   # optional cross-entropy head (as in the reference)
     lr: 5.0e-4
-    weight_decay: 1.0e-5
+    weight_decay: 0.01   # reference leaves AdamW weight_decay at the 0.01 default
     t_max: 100         # reference (phlab-neurips25): CosineAnnealingLR T_max
     eta_min: 1.0e-6    # reference: CosineAnnealingLR eta_min
 
@@ -60,6 +60,6 @@ data:
   class_path: data.datasets.JetClassDataModule    # plain (features, label) -- single view
   init_args:
     data_dir: /n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/
-    classes: [QCD, Tbqq, Wqq, Zqq, Hbb]
+    classes: [QCD, Tbqq, Wqq, Zqq]   # reference 4-class set [qcd, ttbar, wqq, zqq]
     batch_size: 1024   # reference (phlab-neurips25) value
     num_workers: 1
