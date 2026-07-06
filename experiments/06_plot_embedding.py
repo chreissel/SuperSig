@@ -40,7 +40,7 @@ from lightning.pytorch.cli import LightningCLI
 from common import frozen_encoder
 from models.config import plot_path, DEVICE
 from data.jetclass_data import DEFAULT_CLASSES
-from utils.plotting import plot_corner
+from utils.plotting import save_corner
 
 
 def build_from_config(config):
@@ -112,9 +112,10 @@ def main():
 
     cfg_tag = os.path.splitext(os.path.basename(args.config))[0]
     out = args.out or plot_path(f"{cfg_tag}_embedding.png")
-    plot_corner(embs, labels, out,
-                title=f"{cfg_tag} test embedding "
-                      f"(labels 0..: {', '.join(DEFAULT_CLASSES)})")
+    # Reference-style corner plot (phlab-neurips25 make_corner), the same style
+    # it logs to W&B: DEFAULT_CLASSES gives the per-index class names for the legend.
+    save_corner(embs, labels, out, label_names=DEFAULT_CLASSES,
+                title=f"{cfg_tag} test embedding")
 
 
 if __name__ == "__main__":
