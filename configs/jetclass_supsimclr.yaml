@@ -2,10 +2,9 @@
 # view per jet, positives from labels, SupervisedSimCLRLoss on the projection.
 # This mirrors phlab-neurips25's JetClassSimCLRModel(sup_simclr=True).
 #
-# Trains on the full [QCD, Tbqq, Wqq, Zqq, Hbb] set.  Following the reference
-# convention (encoder output dim == number of classes), the embedding/projector
-# dimension is 5.  See jetclass_supsimclr_holdout4.yaml for the run with Hbb
-# held out.
+# Trains on the full [QCD, Tbqq, Wqq, Zqq, Hbb] set with a 4-dim embedding /
+# projection.  See jetclass_supsimclr_holdout4.yaml for the run with Hbb held
+# out.
 #   python cli.py fit --config configs/jetclass_supsimclr.yaml
 trainer:
   accelerator: auto
@@ -41,7 +40,7 @@ model:
       class_path: models.networks.ParticleTransformerModel
       init_args:
         input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
-        emb_dim: 5             # output dim == n_classes (reference convention), 5 here
+        emb_dim: 4             # embedding / projection dimension
         embed_dims: [128, 512, 128]
         pair_embed_dims: [64, 64, 64]
         num_heads: 8
@@ -51,9 +50,9 @@ model:
     projector:
       class_path: models.networks.MLP
       init_args:
-        input_dim: 5           # MLP 5 -> [5] -> 5
-        hidden_dims: [5]
-        output_dim: 5
+        input_dim: 4           # MLP 4 -> [4] -> 4
+        hidden_dims: [4]
+        output_dim: 4
     temperature: 0.1
     # classifier: null   # optional cross-entropy head (as in the reference)
     lr: 5.0e-4
