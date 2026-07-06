@@ -16,6 +16,12 @@ trainer:
         monitor: val/loss
         mode: min
         save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        mode: min
+        patience: 3          # stop after 3 epochs without val/loss improvement
+        min_delta: 0.0
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
