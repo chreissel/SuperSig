@@ -2,6 +2,7 @@
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 from sklearn.metrics import roc_curve, auc
 from sklearn.preprocessing import label_binarize
@@ -76,4 +77,57 @@ def plot_corner(embs, labels, out_path, title=None, max_per_class=400):
     if title:
         fig.suptitle(title, y=1.0)
     fig.savefig(out_path, dpi=110, bbox_inches="tight"); plt.close(fig)
+    print(f"  saved {out_path}")
+
+
+# --------------------------------------------------------------------------- #
+# Reference-style corner plot (phlab-neurips25 utils.plotting.make_corner)      #
+#                                                                             #
+# Faithful port of the reference's embedding plot -- the same one it logs to    #
+# Weights & Biases: an N x N grid of plain-matplotlib axes with step histograms #
+# on the diagonal and s=0.5 scatter in the lower triangle, one default          #
+# color-cycle colour ("C0", "C1", ...) per class, and a Patch legend in the     #
+# top-right cell.  Kept byte-compatible in style; extended only with optional   #
+# title / save so it can be used stand-alone as well as returned as a figure.   #
+# --------------------------------------------------------------------------- #
+def make_corner(x, labels, label_names=None, axwidth=2, return_fig=False):
+    N = x.shape[1]
+    fig, axes = plt.subplots(N, N, figsize=(N * axwidth, N * axwidth))
+    for i in range(N):
+        for j in range(N):
+            plt.sca(axes[i, j])
+            plt.axis("off")
+
+    unique_labels = sorted(list(set(labels)))
+    patches = []
+    xlims = [[np.quantile(x[:, i], 0.00), np.quantile(x[:, i], 1.0)] for i in range(N)]
+    bins = [np.linspace(xlims[i][0], xlims[i][1], 20) for i in range(N)]
+    for il, label in enumerate(unique_labels):
+        mask = labels == label
+        for i in range(N):
+            plt.sca(axes[i, i])
+            plt.axis("on")
+            plt.hist(x[mask, i], bins=bins[i], density=True, histtype="step", color=f"C{il}")
+
+        for i in range(1, N):
+            for j in range(i):
+                plt.sca(axes[i, j])
+                plt.scatter(x[mask, j], x[mask, i], s=0.5, color=f"C{il}")
+                plt.xlim(axes[j, j].get_xlim())
+
+        patches.append(Patch(label=label_names[label] if label_names is not None else label,
+                             color=f"C{il}"))
+
+    plt.sca(axes[0, -1])
+    plt.legend(handles=patches, ncol=3)
+    if return_fig:
+        return fig
+
+
+def save_corner(x, labels, out_path, label_names=None, title=None, axwidth=2, dpi=150):
+    """Draw the reference-style ``make_corner`` and save it to ``out_path``."""
+    fig = make_corner(x, labels, label_names=label_names, axwidth=axwidth, return_fig=True)
+    if title:
+        fig.suptitle(title)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight"); plt.close(fig)
     print(f"  saved {out_path}")
