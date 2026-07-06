@@ -2,14 +2,14 @@
 # view per jet, positives from labels, SupervisedSimCLRLoss on the projection.
 # This mirrors phlab-neurips25's JetClassSimCLRModel(sup_simclr=True).
 #
-# ALL-FIVE-CLASSES variant: trains on the full [QCD, Tbqq, Wqq, Zqq, Hbb] set.
-# Following the reference convention (encoder output dim == number of classes),
-# the embedding/projector dimension is 5.  See jetclass_supsimclr_holdout4.yaml
-# for the run with Hbb held out.
-#   python cli.py fit --config configs/jetclass_supsimclr_5class.yaml
+# Trains on the full [QCD, Tbqq, Wqq, Zqq, Hbb] set.  Following the reference
+# convention (encoder output dim == number of classes), the embedding/projector
+# dimension is 5.  See jetclass_supsimclr_holdout4.yaml for the run with Hbb
+# held out.
+#   python cli.py fit --config configs/jetclass_supsimclr.yaml
 trainer:
   accelerator: auto
-  default_root_dir: runs/jetclass_supsimclr_5class/
+  default_root_dir: runs/jetclass_supsimclr/
   max_epochs: 100
   log_every_n_steps: 1
   # Cap the data seen per epoch, mirroring phlab-neurips25.
@@ -30,9 +30,9 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: SuperSIG
-      name: jetclass_supsimclr_5class
+      name: jetclass_supsimclr
       group: jetclass
-      save_dir: runs/jetclass_supsimclr_5class/
+      save_dir: runs/jetclass_supsimclr/
 
 model:
   class_path: models.litmodels.SupSimCLRModule
