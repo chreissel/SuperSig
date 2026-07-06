@@ -5,7 +5,7 @@
 trainer:
   accelerator: auto
   default_root_dir: runs/jetclass_supsimclr/
-  max_epochs: 8
+  max_epochs: 100
   log_every_n_steps: 10
   # Cap the data seen per epoch, mirroring phlab-neurips25.
   limit_train_batches: 100
@@ -19,9 +19,8 @@ trainer:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: val/loss
+        patience: 20         # reference (phlab-neurips25) value
         mode: min
-        patience: 3          # stop after 3 epochs without val/loss improvement
-        min_delta: 0.0
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
