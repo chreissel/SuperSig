@@ -1,10 +1,15 @@
 # JetClass supervised SimCLR (single view, reference-faithful): one un-augmented
 # view per jet, positives from labels, SupervisedSimCLRLoss on the projection.
 # This mirrors phlab-neurips25's JetClassSimCLRModel(sup_simclr=True).
-#   python cli.py fit --config configs/jetclass_supsimclr.yaml
+#
+# HOLD-OUT-4 variant: the Hbb class (index 4 in the full set) is held out, so
+# training/validation see only the 4-class set [QCD, Tbqq, Wqq, Zqq] -- exactly
+# the reference's [qcd, ttbar, wqq, zqq]. See jetclass_supsimclr_5class.yaml for
+# the all-five-classes run.
+#   python cli.py fit --config configs/jetclass_supsimclr_holdout4.yaml
 trainer:
   accelerator: auto
-  default_root_dir: runs/jetclass_supsimclr/
+  default_root_dir: runs/jetclass_supsimclr_holdout4/
   max_epochs: 100
   log_every_n_steps: 1
   # Cap the data seen per epoch, mirroring phlab-neurips25.
@@ -25,9 +30,9 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: SuperSIG
-      name: jetclass_supsimclr
+      name: jetclass_supsimclr_holdout4
       group: jetclass
-      save_dir: runs/jetclass_supsimclr/
+      save_dir: runs/jetclass_supsimclr_holdout4/
 
 model:
   class_path: models.litmodels.SupSimCLRModule
