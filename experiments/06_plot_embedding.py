@@ -45,10 +45,15 @@ from utils.plotting import save_corner
 
 def build_from_config(config):
     """Instantiate the model + datamodule from a training config (no trainer run)."""
-    cli = LightningCLI(
-        args=["--config", config, "--trainer.logger=false"],
-        run=False, save_config_callback=None,
-    )
+    # Hide this script's own CLI flags from LightningCLI (it parses `args=` only).
+    argv, sys.argv = sys.argv, sys.argv[:1]
+    try:
+        cli = LightningCLI(
+            args=["--config", config, "--trainer.logger=false"],
+            run=False, save_config_callback=None,
+        )
+    finally:
+        sys.argv = argv
     return cli.model, cli.datamodule
 
 
