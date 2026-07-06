@@ -12,8 +12,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import lightning as pl
 
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
 from . import losses as _losses
 from .config import EMB_DIM, N_CLASSES
+from .simclr_losses import SupervisedSimCLRLoss
 from .losses import (
     sigreg_loss,
     classwise_sigreg_loss,
@@ -231,3 +234,61 @@ class SupConModule(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+# --------------------------------------------------------------------------- #
+# Supervised SimCLR (single view, reference-faithful)                          #
+#                                                                             #
+# This mirrors phlab-neurips25's JetClassSimCLRModel with sup_simclr=True: a   #
+# *single* (un-augmented) view per jet, positives defined by the labels, and   #
+# the reference's SupervisedSimCLRLoss on the normalized projection.  Unlike    #
+# SupConModule (two augmented views), the loader yields plain (x, y).           #
+# --------------------------------------------------------------------------- #
+class SupSimCLRModule(pl.LightningModule):
+    """
+    Supervised SimCLR (single-view), faithful to the reference.  Batch is
+    ``(x, label)``; the jet is embedded, projected, L2-normalised and passed as a
+    one-view feature ``[N, 1, D]`` to ``SupervisedSimCLRLoss`` with the labels.
+    An optional classifier head adds a cross-entropy term (as in the reference).
+
+    Optimizer/scheduler match the reference (AdamW + CosineAnnealingLR).
+    """
+
+    def __init__(self, encoder, projector=None, temperature=0.1, classifier=None,
+                 lambda_classifier=1.0, lr=5e-4, weight_decay=1e-5, t_max=10, eta_min=1e-6):
+        super().__init__()
+        self.encoder = encoder
+        self.projector = projector
+        self.classifier = classifier
+        self.lambda_classifier = lambda_classifier
+        self.simclr_criterion = SupervisedSimCLRLoss(temperature=temperature)
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.t_max = t_max
+        self.eta_min = eta_min
+        self.save_hyperparameters(ignore=["encoder", "projector", "classifier"])
+
+    def forward(self, x):
+        return self.encoder(x)                              # embedding for downstream eval
+
+    def _step(self, batch, stage):
+        x, y = batch
+        h = self.encoder(x)
+        z = self.projector(h) if self.projector is not None else h
+        z = F.normalize(z, dim=1).unsqueeze(1)              # (N, 1, D) single view
+        loss = self.simclr_criterion(z, labels=y)
+        if self.classifier is not None:
+            loss = loss + self.lambda_classifier * F.cross_entropy(self.classifier(h), y)
+        self.log(f"{stage}/loss", loss, prog_bar=True, on_step=(stage == "train"), on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, "val")
+
+    def configure_optimizers(self):
+        opt = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        sch = CosineAnnealingLR(opt, T_max=self.t_max, eta_min=self.eta_min)
+        return {"optimizer": opt, "lr_scheduler": {"scheduler": sch}}
