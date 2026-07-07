@@ -41,7 +41,7 @@ model:
       class_path: models.networks.ParticleTransformerModel
       init_args:
         input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
-        emb_dim: 4             # reference (phlab-neurips25): num_classes/out dim = 4
+        emb_dim: 8             # embedding / projection dimension
         embed_dims: [128, 512, 128]
         pair_embed_dims: [64, 64, 64]
         num_heads: 8
@@ -51,9 +51,9 @@ model:
     projector:
       class_path: models.networks.MLP
       init_args:
-        input_dim: 4           # reference: MLP 4 -> [4] -> 4
-        hidden_dims: [4]
-        output_dim: 4
+        input_dim: 8           # MLP 8 -> [8] -> 8
+        hidden_dims: [8]
+        output_dim: 8
     temperature: 0.1
     # classifier: null   # optional cross-entropy head (as in the reference)
     lr: 5.0e-4

@@ -3,7 +3,7 @@
 trainer:
   accelerator: auto
   default_root_dir: runs/jetclass_supcon/
-  max_epochs: 8
+  max_epochs: 100
   log_every_n_steps: 10
   # Cap the data seen per epoch, mirroring phlab-neurips25 (only a fraction of the
   # full JetClass training set is used).  Falls back to using all available
@@ -16,6 +16,11 @@ trainer:
         monitor: val/loss
         mode: min
         save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        patience: 20         # stop when val/loss stalls (reference value)
+        mode: min
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
@@ -31,7 +36,7 @@ model:
       class_path: models.networks.ParticleTransformerModel
       init_args:
         input_dim: 17          # 17 per-particle features (see data/jetclass_data.py)
-        emb_dim: 16            # embedding / contrastive-space dimension
+        emb_dim: 8            # embedding / contrastive-space dimension
         embed_dims: [128, 512, 128]
         pair_embed_dims: [64, 64, 64]
         num_heads: 8
@@ -41,9 +46,9 @@ model:
     projector:
       class_path: models.networks.MLP
       init_args:
-        input_dim: 16
-        hidden_dims: [16]
-        output_dim: 16
+        input_dim: 8
+        hidden_dims: [8]
+        output_dim: 8
     temperature: 0.1
     lr: 1.0e-3
 
