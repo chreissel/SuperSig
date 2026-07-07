@@ -10,14 +10,13 @@ dropped into the (dataset-agnostic) Lightning modules via the YAML config.
 """
 import torch.nn as nn
 
-from .config import EMB_DIM, N_CLASSES
-
 
 class ConvBackbone(nn.Module):
     """Shared convolutional feature extractor -> `emb_dim` embedding."""
 
-    def __init__(self, emb_dim=EMB_DIM):
+    def __init__(self, emb_dim=16):
         super().__init__()
+        self.emb_dim = emb_dim
         self.features = nn.Sequential(
             nn.Conv2d(1, 32, 3, padding=1), nn.ReLU(),
             nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
@@ -39,7 +38,7 @@ class ConvBackbone(nn.Module):
 class SupervisedCNN(nn.Module):
     """Backbone + classification head, trained end-to-end (baseline)."""
 
-    def __init__(self, emb_dim=EMB_DIM, n_classes=N_CLASSES):
+    def __init__(self, emb_dim=16, n_classes=10):
         super().__init__()
         self.backbone = ConvBackbone(emb_dim)
         self.classifier = nn.Linear(emb_dim, n_classes)
@@ -84,13 +83,14 @@ class ParticleTransformerModel(nn.Module):
     embedding (ParT's `num_classes` output = the contrastive space).
     """
 
-    def __init__(self, input_dim=17, emb_dim=EMB_DIM, pair_input_dim=4,
+    def __init__(self, input_dim=17, emb_dim=8, pair_input_dim=4,
                  embed_dims=(128, 512, 128), pair_embed_dims=(64, 64, 64),
                  num_heads=8, num_layers=8, num_cls_layers=2, fc_params=((128, 0.0),),
                  **kwargs):
         super().__init__()
         from .parT import ParticleTransformer
         self.input_dim = input_dim
+        self.emb_dim = emb_dim
         self.pair_input_dim = pair_input_dim
         self.model = ParticleTransformer(
             input_dim=input_dim, num_classes=emb_dim, pair_input_dim=pair_input_dim,
@@ -112,7 +112,7 @@ class ParticleTransformerModel(nn.Module):
 class SupervisedJetNet(nn.Module):
     """ParticleTransformer backbone + linear classifier, end-to-end (JetClass baseline)."""
 
-    def __init__(self, input_dim, emb_dim=EMB_DIM, n_classes=N_CLASSES):
+    def __init__(self, input_dim, emb_dim=8, n_classes=5):
         super().__init__()
         self.backbone = ParticleTransformerModel(input_dim=input_dim, emb_dim=emb_dim)
         self.classifier = nn.Linear(emb_dim, n_classes)

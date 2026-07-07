@@ -2,31 +2,31 @@
 Export frozen-encoder embeddings for the JetClass test split to numpy, one npz
 per ROOT file.
 
-Loads a checkpoint (e.g. the 4-class hold-out-4 supervised-SimCLR model) and runs
-its frozen encoder over the test set of **all five** classes -- including the
-held-out Hbb class -- but writes the result of **each ROOT file to its own npz**.
-Processing one file at a time keeps memory bounded and avoids a single enormous
-write, so it scales to the full ``test_20M`` split without I/O trouble.
+Loads a checkpoint (e.g. the 4-class hold-out-4 SupCon model) and runs its frozen
+encoder over the test set of **all five** classes -- including the held-out Hbb
+class -- but writes the result of **each ROOT file to its own npz**.  Processing
+one file at a time keeps memory bounded and avoids a single enormous write, so it
+scales to the full ``test_20M`` split without I/O trouble.
 
 Each per-file npz holds one row per jet::
 
-    label, z0, z1, z2, z3
+    label, z0, z1, ..., z(D-1)      # D = the encoder's embedding dim
 
 The model and data are reconstructed from the same training config the checkpoint
 was produced with (so the encoder architecture matches exactly); the only change
 for the export is that the test class list is expanded to all five classes, so the
 held-out class is embedded too.
 
-Typical use with the hold-out-4 checkpoint (encoder embedding dim = 4)::
+Typical use with the hold-out-4 checkpoint::
 
     python experiments/07_export_embeddings.py \
-        --config  configs/jetclass_supsimclr_holdout4.yaml \
-        --ckpt    runs/jetclass_supsimclr_holdout4/checkpoints/last.ckpt \
+        --config  configs/jetclass_supcon_holdout4.yaml \
+        --ckpt    runs/jetclass_supcon_holdout4/checkpoints/last.ckpt \
         --out-dir holdout4_test_embeddings/
 
 Each output file ``<out-dir>/<root-file-stem>.npz`` contains:
     labels      : int64  [n]        class index (0..4; 4 = Hbb, the held-out class)
-    embeddings  : float32[n, D]      the D-dim embedding (D = 4 for the hold-out-4 model)
+    embeddings  : float32[n, D]      the D-dim embedding (D = the encoder emb_dim)
     table       : float32[n, 1 + D]  columns [label, z0, z1, ..., z(D-1)]
     columns     : str   [1 + D]      column names for `table`
 """

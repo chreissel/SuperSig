@@ -19,8 +19,9 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, classwise_dm, outfile, n_classes, CLASS_WORD, DATASETS)
-from models.config import plot_path, EMB_DIM, HOLDOUT, DEVICE
+                    make_encoder, emb_dim_from_ckpt, plain_dm, classwise_dm, outfile,
+                    n_classes, CLASS_WORD, DATASETS)
+from models.config import plot_path, HOLDOUT, DEVICE
 from models.litmodels import ClasswiseSIGRegModule
 from utils.eval import train_binary_probe, collect_binary_scores, collect_embeddings
 from utils.plotting import plot_binary_roc, plot_corner
@@ -31,12 +32,13 @@ def run_mode(mode, dataset, probe_dm, ssl_ep, probe_ep, quick, ckpt=None, data_d
     word = CLASS_WORD[dataset]
     print(f"\n===== MODE: {mode} (embedding trained WITHOUT {word} {HOLDOUT}) =====")
     emb_dm = classwise_dm(dataset, quick, 256, holdout=HOLDOUT, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
-    module = ClasswiseSIGRegModule(make_encoder(dataset), mode=mode, n_classes=n_classes(dataset))
+    emb_dim = emb_dim_from_ckpt(ckpt) if ckpt else None
+    module = ClasswiseSIGRegModule(make_encoder(dataset, emb_dim=emb_dim), mode=mode, n_classes=n_classes(dataset))
     fit_or_load(module, emb_dm, ssl_ep, quick, ckpt=ckpt)
     backbone = frozen_encoder(module)
 
     print(f"  --- freeze, train {HOLDOUT}-vs-rest linear head ---")
-    head = nn.Linear(EMB_DIM, 2).to(DEVICE)
+    head = nn.Linear(backbone.emb_dim, 2).to(DEVICE)
     train_binary_probe(backbone, head, probe_dm.train_dataloader(), probe_ep)
     scores, ytrue = collect_binary_scores(backbone, head, probe_dm.test_dataloader())
     fpr, tpr, roc_auc = plot_binary_roc(

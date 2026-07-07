@@ -12,9 +12,9 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, make_projector, plain_dm, twoview_dm, outfile,
-                    n_classes, DATASETS)
-from models.config import plot_path, EMB_DIM, DEVICE
+                    make_encoder, make_projector, emb_dim_from_ckpt, plain_dm, twoview_dm,
+                    outfile, n_classes, DATASETS)
+from models.config import plot_path, DEVICE
 from models.litmodels import SIGRegSSLModule
 from utils.eval import train_linear_probe, collect_probs, collect_embeddings
 from utils.plotting import plot_roc, plot_corner
@@ -41,13 +41,17 @@ def main():
     bs = 128 if args.dataset == "mnist" else 256
 
     tv = twoview_dm(args.dataset, args.quick, 256, labeled=False, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
-    module = SIGRegSSLModule(make_encoder(args.dataset), projector=make_projector(args.dataset))
+    # Embedding dim comes from the checkpoint when loading one, else the default.
+    emb_dim = emb_dim_from_ckpt(args.ckpt) if args.ckpt else None
+    encoder = make_encoder(args.dataset, emb_dim=emb_dim)
+    module = SIGRegSSLModule(encoder, projector=make_projector(args.dataset, encoder.emb_dim))
     fit_or_load(module, tv, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
+    d = backbone.emb_dim
 
     nc = n_classes(args.dataset)
     dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class); dm.setup()
-    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
+    head = nn.Linear(d, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels, f"SIGReg (SSL) embedding + frozen linear head ROC [{args.dataset}]",
@@ -55,7 +59,7 @@ def main():
 
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(outfile(args.dataset, "corner_sigreg_16d.png")),
-                title=f"SIGReg 16-dim latent space [{args.dataset}]")
+                title=f"SIGReg {d}-dim latent space [{args.dataset}]")
 
 
 if __name__ == "__main__":
