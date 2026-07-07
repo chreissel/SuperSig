@@ -8,6 +8,12 @@ Works on either dataset via --dataset {mnist,jetclass}.  Runs two experiments:
 Canonical training:
     python cli.py fit --config configs/mnist_supcon.yaml
     python cli.py fit --config configs/jetclass_supcon.yaml
+
+Or load pretrained SupCon embeddings instead of training in-script (the embedding
+dim is read from each checkpoint):
+    python experiments/05_supcon.py --dataset jetclass \
+        --ckpt          runs/jetclass_supcon/checkpoints/last.ckpt \
+        --holdout-ckpt  runs/jetclass_supcon_holdout4/checkpoints/last.ckpt
 """
 import argparse
 import numpy as np
@@ -15,8 +21,8 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, make_projector, plain_dm, twoview_dm, outfile,
-                    n_classes, CLASS_WORD, DATASETS)
+                    make_encoder, make_projector, emb_dim_from_ckpt, plain_dm, twoview_dm,
+                    outfile, n_classes, CLASS_WORD, DATASETS)
 from models.config import plot_path, HOLDOUT, DEVICE
 from models.litmodels import SupConModule
 from utils.eval import (
@@ -27,12 +33,13 @@ from utils.plotting import plot_roc, plot_binary_roc, plot_corner
 
 
 def run_no_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
-                   num_workers=None, max_files_per_class=None):
+                   num_workers=None, max_files_per_class=None, ckpt=None):
     print(f"\n===== SupCon, NO holdout (10-way) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
-    encoder = make_encoder(dataset)
+    emb_dim = emb_dim_from_ckpt(ckpt) if ckpt else None
+    encoder = make_encoder(dataset, emb_dim=emb_dim)
     module = SupConModule(encoder, projector=make_projector(dataset, encoder.emb_dim))
-    fit_or_load(module, tv, ssl_ep, quick)
+    fit_or_load(module, tv, ssl_ep, quick, ckpt=ckpt)
     backbone = frozen_encoder(module)
     d = backbone.emb_dim
 
@@ -49,13 +56,14 @@ def run_no_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
 
 
 def run_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
-                num_workers=None, max_files_per_class=None):
+                num_workers=None, max_files_per_class=None, ckpt=None):
     word = CLASS_WORD[dataset]
     print(f"\n===== SupCon, HOLDOUT {HOLDOUT} ({HOLDOUT}-vs-rest) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, holdout=HOLDOUT, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
-    encoder = make_encoder(dataset)
+    emb_dim = emb_dim_from_ckpt(ckpt) if ckpt else None
+    encoder = make_encoder(dataset, emb_dim=emb_dim)
     module = SupConModule(encoder, projector=make_projector(dataset, encoder.emb_dim))
-    fit_or_load(module, tv, ssl_ep, quick)
+    fit_or_load(module, tv, ssl_ep, quick, ckpt=ckpt)
     backbone = frozen_encoder(module)
 
     dm = plain_dm(dataset, quick, 256, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class); dm.setup()
@@ -77,6 +85,12 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--ssl-epochs", type=int, default=None)
     ap.add_argument("--probe-epochs", type=int, default=None)
+    ap.add_argument("--ckpt", type=str, default=None,
+                    help="load the no-holdout SupCon embedding from this checkpoint "
+                         "(e.g. configs/jetclass_supcon.yaml's last.ckpt) instead of training")
+    ap.add_argument("--holdout-ckpt", type=str, default=None,
+                    help="load the hold-out SupCon embedding from this checkpoint "
+                         "(e.g. configs/jetclass_supcon_holdout4.yaml's last.ckpt) instead of training")
     ap.add_argument("--data-dir", type=str, default=None,
                     help="JetClass ROOT directory (falls back to $JETCLASS_DIR)")
     ap.add_argument("--num-workers", type=int, default=None,
@@ -89,8 +103,8 @@ def main():
     ssl_ep = args.ssl_epochs or default_epochs(args.quick, 8)
     probe_ep = args.probe_epochs or default_epochs(args.quick, 4)
 
-    run_no_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
-    run_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
+    run_no_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class, ckpt=args.ckpt)
+    run_holdout(args.dataset, args.quick, ssl_ep, probe_ep, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class, ckpt=args.holdout_ckpt)
     print("\nDone.")
 
 
