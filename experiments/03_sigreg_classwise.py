@@ -17,8 +17,9 @@ import torch
 import torch.nn as nn
 
 from common import (default_epochs, fit_or_load, frozen_encoder,
-                    make_encoder, plain_dm, classwise_dm, outfile, n_classes, DATASETS)
-from models.config import plot_path, EMB_DIM, DEVICE
+                    make_encoder, emb_dim_from_ckpt, plain_dm, classwise_dm, outfile,
+                    n_classes, DATASETS)
+from models.config import plot_path, DEVICE
 from models.litmodels import ClasswiseSIGRegModule
 from utils.eval import train_linear_probe, collect_probs, collect_embeddings
 from utils.plotting import plot_roc, plot_corner
@@ -53,12 +54,15 @@ def main():
 
     nc = n_classes(args.dataset)
     emb_dm = classwise_dm(args.dataset, args.quick, bs, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class)
-    module = ClasswiseSIGRegModule(make_encoder(args.dataset), mode=args.mode, n_classes=nc)
+    # Embedding dim comes from the checkpoint when loading one, else the default;
+    # ClasswiseSIGRegModule reads it back off the encoder to size its anchors.
+    emb_dim = emb_dim_from_ckpt(args.ckpt) if args.ckpt else None
+    module = ClasswiseSIGRegModule(make_encoder(args.dataset, emb_dim=emb_dim), mode=args.mode, n_classes=nc)
     fit_or_load(module, emb_dm, ssl_ep, args.quick, ckpt=args.ckpt)
     backbone = frozen_encoder(module)
 
     dm = plain_dm(args.dataset, args.quick, bs, data_dir=args.data_dir, num_workers=args.num_workers, max_files_per_class=args.max_files_per_class); dm.setup()
-    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
+    head = nn.Linear(backbone.emb_dim, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels,
@@ -66,8 +70,9 @@ def main():
              plot_path(outfile(args.dataset, f"roc_sigreg_{args.mode}_linear.png")), n_classes=nc)
 
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
-    plot_corner(embs, elab, plot_path(outfile(args.dataset, f"corner_sigreg_{args.mode}_16d.png")),
-                title=f"Class-conditional SIGReg ({TITLES[args.mode]}) 16-dim latent [{args.dataset}]")
+    d = backbone.emb_dim
+    plot_corner(embs, elab, plot_path(outfile(args.dataset, f"corner_sigreg_{args.mode}_{d}d.png")),
+                title=f"Class-conditional SIGReg ({TITLES[args.mode]}) {d}-dim latent [{args.dataset}]")
 
 
 if __name__ == "__main__":

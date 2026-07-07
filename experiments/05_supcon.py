@@ -17,7 +17,7 @@ import torch.nn as nn
 from common import (default_epochs, fit_or_load, frozen_encoder,
                     make_encoder, make_projector, plain_dm, twoview_dm, outfile,
                     n_classes, CLASS_WORD, DATASETS)
-from models.config import plot_path, EMB_DIM, HOLDOUT, DEVICE
+from models.config import plot_path, HOLDOUT, DEVICE
 from models.litmodels import SupConModule
 from utils.eval import (
     train_linear_probe, train_binary_probe,
@@ -30,20 +30,22 @@ def run_no_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
                    num_workers=None, max_files_per_class=None):
     print(f"\n===== SupCon, NO holdout (10-way) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
-    module = SupConModule(make_encoder(dataset), projector=make_projector(dataset))
+    encoder = make_encoder(dataset)
+    module = SupConModule(encoder, projector=make_projector(dataset, encoder.emb_dim))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
+    d = backbone.emb_dim
 
     nc = n_classes(dataset)
     dm = plain_dm(dataset, quick, 256, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class); dm.setup()
-    head = nn.Linear(EMB_DIM, nc).to(DEVICE)
+    head = nn.Linear(d, nc).to(DEVICE)
     train_linear_probe(backbone, head, dm.train_dataloader(), probe_ep)
     probs, labels = collect_probs(lambda x: head(backbone(x)), dm.test_dataloader())
     plot_roc(probs, labels, f"Supervised SimCLR (SupCon) + linear head ROC [{dataset}]",
              plot_path(outfile(dataset, "roc_supcon_linear.png")), n_classes=nc)
     embs, elab = collect_embeddings(backbone, dm.test_dataloader())
     plot_corner(embs, elab, plot_path(outfile(dataset, "corner_supcon_16d.png")),
-                title=f"SupCon 16-dim latent space [{dataset}]")
+                title=f"SupCon {d}-dim latent space [{dataset}]")
 
 
 def run_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
@@ -51,12 +53,13 @@ def run_holdout(dataset, quick, ssl_ep, probe_ep, data_dir=None,
     word = CLASS_WORD[dataset]
     print(f"\n===== SupCon, HOLDOUT {HOLDOUT} ({HOLDOUT}-vs-rest) [{dataset}] =====")
     tv = twoview_dm(dataset, quick, 256, labeled=True, holdout=HOLDOUT, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class)
-    module = SupConModule(make_encoder(dataset), projector=make_projector(dataset))
+    encoder = make_encoder(dataset)
+    module = SupConModule(encoder, projector=make_projector(dataset, encoder.emb_dim))
     fit_or_load(module, tv, ssl_ep, quick)
     backbone = frozen_encoder(module)
 
     dm = plain_dm(dataset, quick, 256, data_dir=data_dir, num_workers=num_workers, max_files_per_class=max_files_per_class); dm.setup()
-    head = nn.Linear(EMB_DIM, 2).to(DEVICE)
+    head = nn.Linear(backbone.emb_dim, 2).to(DEVICE)
     train_binary_probe(backbone, head, dm.train_dataloader(), probe_ep)
     scores, ytrue = collect_binary_scores(backbone, head, dm.test_dataloader())
     plot_binary_roc(scores, ytrue, f"SupCon hold-out-{HOLDOUT} detection ROC [{dataset}]",

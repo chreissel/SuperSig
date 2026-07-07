@@ -18,13 +18,14 @@ import sys
 # Make the repo root importable when a script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import re
+
 import torch
 import lightning as pl
 
 from models.config import DEVICE
 from models.networks import (ConvBackbone, SupervisedCNN, ParticleTransformerModel,
                              SupervisedJetNet, MLP)
-from models.config import EMB_DIM
 from data.datasets import (
     MNISTDataModule, ClasswiseMNISTDataModule, TwoViewMNISTDataModule,
     JetClassDataModule, JetClassClasswiseDataModule, JetClassTwoViewDataModule,
@@ -33,6 +34,10 @@ from data.jetclass_data import N_FEATURES as JET_FEATURES, DEFAULT_CLASSES as JE
 from models.config import N_CLASSES as MNIST_N_CLASSES
 
 DATASETS = ("mnist", "jetclass")
+
+# Default embedding dim for *in-script* training (when no checkpoint is loaded).
+# These mirror the YAML configs; a --ckpt overrides them via emb_dim_from_ckpt.
+DEFAULT_EMB_DIM = {"mnist": 16, "jetclass": 8}
 
 
 def n_classes(dataset):
@@ -47,14 +52,35 @@ def default_epochs(quick, full):
 # --------------------------------------------------------------------------- #
 # Dataset-aware factories: the same test suite, either dataset                 #
 # --------------------------------------------------------------------------- #
-def make_encoder(dataset):
-    """The backbone/encoder appropriate for the dataset (both -> EMB_DIM)."""
-    return ConvBackbone() if dataset == "mnist" else ParticleTransformerModel(input_dim=JET_FEATURES)
+def make_encoder(dataset, emb_dim=None):
+    """The backbone/encoder appropriate for the dataset, producing an ``emb_dim``
+    embedding.  ``emb_dim`` defaults to the dataset's in-script default; pass the
+    value read from a checkpoint (see ``emb_dim_from_ckpt``) to match a loaded model."""
+    emb_dim = emb_dim or DEFAULT_EMB_DIM[dataset]
+    if dataset == "mnist":
+        return ConvBackbone(emb_dim=emb_dim)
+    return ParticleTransformerModel(input_dim=JET_FEATURES, emb_dim=emb_dim)
 
 
-def make_projector(dataset):
+def make_projector(dataset, emb_dim):
     """Projection head for the contrastive modules (JetClass only; mirrors reference)."""
-    return None if dataset == "mnist" else MLP(EMB_DIM, [EMB_DIM], EMB_DIM)
+    return None if dataset == "mnist" else MLP(emb_dim, [emb_dim], emb_dim)
+
+
+def emb_dim_from_ckpt(ckpt_path):
+    """Read the encoder's embedding dimension straight from a checkpoint.
+
+    Returns the out-features of the encoder's final linear -- ParticleTransformer
+    (``encoder.model.fc.<n>.weight``) or ConvBackbone (``encoder.head.<n>.weight``)
+    -- or ``None`` if it can't be determined (caller falls back to the default)."""
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    sd = state.get("state_dict", state)
+    for pat in (r"^encoder\.model\.fc\.(\d+)\.weight$",   # ParticleTransformer
+                r"^encoder\.head\.(\d+)\.weight$"):        # ConvBackbone
+        hits = [(int(m.group(1)), k) for k in sd for m in [re.match(pat, k)] if m]
+        if hits:
+            return sd[max(hits)[1]].shape[0]
+    return None
 
 
 def make_supervised_net(dataset):

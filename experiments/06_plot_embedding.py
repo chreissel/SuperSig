@@ -7,16 +7,15 @@ embedding coloured by class.
 
 Everything about the model and the data (encoder architecture, projector,
 class list, data config) is read straight from the *same* training config, so
-the reconstructed network matches the checkpoint exactly.  Typical use with the
-supervised-SimCLR configs::
+the reconstructed network matches the checkpoint exactly.  Typical use::
 
     python experiments/06_plot_embedding.py \
-        --config configs/jetclass_supsimclr.yaml \
-        --ckpt   runs/jetclass_supsimclr/checkpoints/last.ckpt
+        --config configs/jetclass_supcon.yaml \
+        --ckpt   runs/jetclass_supcon/checkpoints/last.ckpt
 
     python experiments/06_plot_embedding.py \
-        --config configs/jetclass_supsimclr_holdout4.yaml \
-        --ckpt   runs/jetclass_supsimclr_holdout4/checkpoints/last.ckpt
+        --config configs/jetclass_supcon_holdout4.yaml \
+        --ckpt   runs/jetclass_supcon_holdout4/checkpoints/last.ckpt
 
 By default only one ROOT file per class is read (``--max-files-per-class 1``)
 and at most ``--max-jets`` jets are embedded, so the plot is quick to produce.
